@@ -25,7 +25,8 @@ content = content.replace("babase.getsound", "bui.getsound")
 content = content.replace("_babase.screenmessage", "bui.screenmessage")
 content = content.replace("babase.screenmessage", "bui.screenmessage")
 # For transmission:
-content = content.replace("bascenev1.screenmessage", "bui.screenmessage")
+content = content.replace("_babase.screenmessage", "bascenev1.screenmessage")
+content = content.replace("babase.screenmessage", "bascenev1.screenmessage")
 
 
 content = content.replace("babase.Window", "bui.Window")
