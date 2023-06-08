@@ -78,6 +78,9 @@ content = content.replace("babase.buttonwidget", "bui.buttonwidget")
 content = content.replace("babase.textwidget", "bui.textwidget")
 content = content.replace("babase.checkboxwidget", "bui.checkboxwidget")
 content = content.replace("babase.imagewidget", "bui.imagewidget")
+
+# Converting `ba.playsound(abc)` to `abc.play()` is tricky.
+# Do it manually in case regex substitution fails.
 content = re.sub(
     r'babase\.playsound\(\s*([^,\n]+),\s*([^,\n]+),\s*position=([^,\n]+)\)',
     r'\1.play(\2, position=\3)',
@@ -85,6 +88,11 @@ content = re.sub(
     flags=re.MULTILINE
 )
 content = re.sub("babase\.playsound\((.+?), (.+?), (.+?)\)", "\\1.play(\\2, \\3)", content)
+content = re.sub(
+    r'babase\.playsound\(([^,\n]+),\s*position=([^,\n]+)\)',
+    r'\1.play(position=\2)',
+    content
+)
 content = re.sub("babase\.playsound\((.*)\)", "\\1.play()", content)
 
 content = content.replace("babase.internal.add_transaction", "bui.app.plus.add_v1_account_transaction")
