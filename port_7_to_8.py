@@ -45,4 +45,7 @@ content = content.replace("babase.internal.run_transaction", "bui.app.plus.run_v
 content = content.replace("_babase.add_transaction", "bui.app.plus.add_v1_account_transaction")
 content = content.replace("_babase.run_transactions", "bui.app.plus.run_v1_account_transactions")
 
+content = content.replace("bastd.ui", "bauiv1lib")
+content = content.replace("bastd", "bascenev1lib")
+
 print(content)
