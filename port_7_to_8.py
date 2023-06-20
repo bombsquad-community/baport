@@ -17,18 +17,21 @@ content = content.replace("import ba", "import babase\nimport bauiv1 as bui\nimp
 content = content.replace("babase.app.ui", "bui.app.ui_v1")
 content = content.replace("babase.app.accounts_v1", "bui.app.classic.accounts")
 
-
+###################################################################################
 # Comment out one of these as per your requirements, depending whether to
 # stay local or if it'll also be needed to transmitted to the clients.
 
 ## For local:
 # content = content.replace("_babase.screenmessage", "bui.screenmessage")
 # content = content.replace("babase.screenmessage", "bui.screenmessage")
-# content = content.replace("babase.getsound", "bui.getsound")
-## For transmission:
-content = content.replace("babase.screenmessage", "bs.screenmessage")
-content = content.replace("babase.getsound", "bs.getsound")
 
+# content = content.replace("babase.getsound", "bui.getsound")
+
+## For transmission:
+content = content.replace("babase.screenmessage", "bs.broadcastmessage")
+
+content = content.replace("babase.getsound", "bs.getsound")
+###################################################################################
 
 content = content.replace("babase.IntSetting", "bs.IntSetting")
 content = content.replace("babase.IntChoiceSetting", "bs.IntChoiceSetting")
