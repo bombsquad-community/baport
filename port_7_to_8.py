@@ -8,11 +8,13 @@ with open(sys.argv[1], "rb") as fin:
 content = content.replace("# ba_meta require api 7", "# ba_meta require api 8")
 content = content.replace("# ba_meta export game", "# ba_meta export bascenev1.GameActivity")
 
+content = content.replace("user_agent_string", "legacy_user_agent_string")
+content = content.replace("_ba.", "_babase.")
 content = content.replace("_ba.", "_babase.")
 content = content.replace("ba.", "babase.")
 content = content.replace("import _ba", "import _babase")
 content = content.replace("import ba", "import babase\nimport bauiv1 as bui\nimport bascenev1 as bs")
-content = content.replace("babase.app.ui", "bui.app.classic.ui")
+content = content.replace("babase.app.ui", "bui.app.ui_v1")
 content = content.replace("babase.app.accounts_v1", "bui.app.classic.accounts")
 
 
