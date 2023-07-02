@@ -1,8 +1,10 @@
-# Usage: ./port_7_to_8.py api_7_plugin.py > api_8_plugin.py
+# Usage: port_7_to_8.py <plugin-name> <client/server type of mod>
+
 import re
 import sys
 
 with open(sys.argv[1], "rb") as fin:
+    print("Porting "+ sys.argv[1])
     content = fin.read().decode("utf-8")
 
 content = content.replace("# ba_meta require api 7", "# ba_meta require api 8")
@@ -12,8 +14,9 @@ content = content.replace("user_agent_string", "legacy_user_agent_string")
 content = content.replace("_ba.", "_babase.")
 content = content.replace("_ba.", "_babase.")
 content = content.replace("ba.", "babase.")
-content = content.replace("import _ba", "import _babase")
-content = content.replace("import ba", "import babase\nimport bauiv1 as bui\nimport bascenev1 as bs")
+content = content.replace("import _ba\n", "import _babase")
+content = re.sub(r'\bimport _ba\b', "import _babase", content)
+content = re.sub(r'\bimport ba(\b|\.(\w+))', "import babase\nimport bauiv1 as bui\nimport bascenev1 as bs", content)
 content = content.replace("babase.app.ui", "bui.app.ui_v1")
 content = content.replace("babase.app.accounts_v1", "bui.app.classic.accounts")
 
@@ -22,17 +25,21 @@ content = content.replace("babase.app.accounts_v1", "bui.app.classic.accounts")
 # stay local or if it'll also be needed to transmitted to the clients.
 
 ## For local:
-# content = content.replace("_babase.screenmessage", "bui.screenmessage")
-# content = content.replace("babase.screenmessage", "bui.screenmessage")
-
-# content = content.replace("babase.getsound", "bui.getsound")
-
+if sys.argv[2] == "client":
+    content = content.replace("_babase.screenmessage", "bui.screenmessage")
+    content = content.replace("babase.screenmessage", "bui.screenmessage")
+    content = content.replace("babase.getsound", "bui.getsound")
+    content = content.replace("babase.gettexture", "bui.gettexture")
+    content = content.replace("babase.getmesh", "bui.getmesh")
+    content = content.replace("babase.getcollisionmesh", "bui.getcollisionmesh")
+else:
 ## For transmission:
-content = content.replace("babase.screenmessage", "bs.broadcastmessage")
-
-content = content.replace("babase.getsound", "bs.getsound")
+    content = content.replace("babase.screenmessage", "bs.broadcastmessage")
+    content = content.replace("babase.getsound", "bs.getsound")
+    content = content.replace("babase.getmesh", "bs.getmesh")
+    content = content.replace("babase.getcollisionmesh", "bs.getcollisionmesh")
 ###################################################################################
-
+content = content.replace("babase.open_url", "bui.open_url")
 content = content.replace("babase.IntSetting", "bs.IntSetting")
 content = content.replace("babase.IntChoiceSetting", "bs.IntChoiceSetting")
 content = content.replace("babase.FloatChoiceSetting", "bs.FloatChoiceSetting")
@@ -83,7 +90,7 @@ content = content.replace("babase.buttonwidget", "bui.buttonwidget")
 content = content.replace("babase.textwidget", "bui.textwidget")
 content = content.replace("babase.checkboxwidget", "bui.checkboxwidget")
 content = content.replace("babase.imagewidget", "bui.imagewidget")
-
+content = content.replace("_bui", "bui")
 # Converting `ba.playsound(abc)` to `abc.play()` is tricky.
 # Do it manually in case regex substitution fails.
 content = re.sub(
@@ -107,5 +114,11 @@ content = content.replace("_babase.run_transactions", "bui.app.plus.run_v1_accou
 
 content = content.replace("bastd.ui", "bauiv1lib")
 content = content.replace("bastd", "bascenev1lib")
+content = content.replace("timetype=","")
+content = content.replace("babase.columnwidget", "bui.columnwidget")
+content = content.replace("_babase.get_chat_messages", "bs.get_chat_messages")
+content = content.replace("_babase.get_foreground_host_session","bs.get_foreground_host_session")
+content = re.sub(r'bs\.Timer\(([^)]*)\bTimeType\.REAL\b([^)]*)\)', r'babase.AppTimer(\1\2)', content)
 
-print(content)
+with open(sys.argv[1], "w") as f:
+    f.write(content)
