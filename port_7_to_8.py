@@ -111,7 +111,11 @@ content = content.replace("babase.internal.add_transaction", "bui.app.plus.add_v
 content = content.replace("babase.internal.run_transaction", "bui.app.plus.run_v1_account_transaction")
 content = content.replace("_babase.add_transaction", "bui.app.plus.add_v1_account_transaction")
 content = content.replace("_babase.run_transactions", "bui.app.plus.run_v1_account_transactions")
+content = content.replace("babase._store.get_store_layout", "bui.app.classic.store.get_store_layout")
+content = content.replace("babase.internal.get_store_layout", "bui.app.classic.store.get_store_layout")
 
+content = content.replace("babase._store", "")
+content = content.replace("babase.internal", "")
 content = content.replace("bastd.ui", "bauiv1lib")
 content = content.replace("bastd", "bascenev1lib")
 content = content.replace("timetype=","")
