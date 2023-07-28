@@ -79,6 +79,8 @@ content = content.replace("babase.GameResults", "bs.GameResults")
 content = content.replace("babase.getmaps", "bs.app.classic.getmaps")
 content = content.replace("babase.cameraflash", "bs.cameraflash")
 content = content.replace("babase.getmodel", "bs.getmesh")
+content = content.replace("babase.Map", "bs.Map")
+content = content.replace("babase._map", "bs._map")
 content = content.replace("model", "mesh")
 
 content = content.replace("babase.Window", "bui.Window")
