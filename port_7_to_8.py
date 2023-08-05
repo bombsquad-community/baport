@@ -1,5 +1,10 @@
 # Usage: port_7_to_8.py <plugin-name> <client/server type of mod>
 
+# You'll have to manually update the following:
+# with ba.Context(_ba.foreground_host_activity()):
+# To:
+# with _ba.foreground_host_activity().context:
+
 import re
 import sys
 
@@ -124,6 +129,7 @@ content = content.replace("timetype=","")
 content = content.replace("babase.columnwidget", "bui.columnwidget")
 content = content.replace("_babase.get_chat_messages", "bs.get_chat_messages")
 content = content.replace("_babase.get_foreground_host_session","bs.get_foreground_host_session")
+content = content.replace("_babase.get_foreground_host_activity","bs.get_foreground_host_activity")
 content = re.sub(r'bs\.Timer\(([^)]*)\bTimeType\.REAL\b([^)]*)\)', r'babase.AppTimer(\1\2)', content)
 
 with open(sys.argv[1], "w") as f:
