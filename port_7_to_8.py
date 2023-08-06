@@ -1,4 +1,4 @@
-# Usage: port_7_to_8.py <plugin-name> <client/server type of mod>
+# Usage: port_7_to_8.py <client/server type of mod> <plugin-name>
 
 # You'll have to manually update the following:
 # with ba.Context(_ba.foreground_host_activity()):
@@ -8,8 +8,8 @@
 import re
 import sys
 
-with open(sys.argv[1], "rb") as fin:
-    print("Porting "+ sys.argv[1])
+with open(sys.argv[2], "rb") as fin:
+    print("Porting "+ sys.argv[2])
     content = fin.read().decode("utf-8")
 
 content = content.replace("# ba_meta require api 7", "# ba_meta require api 8")
@@ -19,9 +19,9 @@ content = content.replace("user_agent_string", "legacy_user_agent_string")
 content = content.replace("_ba.", "_babase.")
 content = content.replace("_ba.", "_babase.")
 content = content.replace("ba.", "babase.")
-content = content.replace("import _ba\n", "import _babase")
+content = content.replace("import _ba", "import _babase")
 content = re.sub(r'\bimport _ba\b', "import _babase", content)
-content = re.sub(r'\bimport ba(\b|\.(\w+))', "import babase\nimport bauiv1 as bui\nimport bascenev1 as bs", content)
+content = re.sub(r'\bimport ba(\b|\.(\w+))', "import babase\nimport bauiv1 as bui\nimport bascenev1\nimport bascenev1 as bs", content)
 content = content.replace("babase.app.ui", "bui.app.ui_v1")
 content = content.replace("babase.app.accounts_v1", "bui.app.classic.accounts")
 
@@ -30,10 +30,11 @@ content = content.replace("babase.app.accounts_v1", "bui.app.classic.accounts")
 # stay local or if it'll also be needed to transmitted to the clients.
 
 ## For local:
-if sys.argv[2] == "client":
+if sys.argv[1] == "client":
     content = content.replace("_babase.screenmessage", "bui.screenmessage")
     content = content.replace("babase.screenmessage", "bui.screenmessage")
     content = content.replace("babase.getsound", "bui.getsound")
+    content = content.replace("_babase.gettexture", "bui.gettexture")
     content = content.replace("babase.gettexture", "bui.gettexture")
     content = content.replace("babase.getmesh", "bui.getmesh")
     content = content.replace("babase.getcollisionmesh", "bui.getcollisionmesh")
@@ -41,6 +42,8 @@ else:
 ## For transmission:
     content = content.replace("babase.screenmessage", "bs.broadcastmessage")
     content = content.replace("babase.getsound", "bs.getsound")
+    content = content.replace("_babase.gettexture", "bs.gettexture")
+    content = content.replace("babase.gettexture", "bs.gettexture")
     content = content.replace("babase.getmesh", "bs.getmesh")
     content = content.replace("babase.getcollisionmesh", "bs.getcollisionmesh")
 ###################################################################################
@@ -74,7 +77,6 @@ content = content.replace("babase.NotFoundError", "bs.NotFoundError")
 content = content.replace("babase.getcollision", "bs.getcollision")
 content = content.replace("babase.app.lang", "bs.app.lang")
 content = content.replace("babase.MusicType", "bs.MusicType")
-content = content.replace("babase.gettexture", "bs.gettexture")
 content = content.replace("babase.getactivity", "bs.getactivity")
 content = content.replace("babase.getactivity", "bs.getactivity")
 content = content.replace("babase.CelebrateMessage", "bs.CelebrateMessage")
@@ -84,9 +86,40 @@ content = content.replace("babase.GameResults", "bs.GameResults")
 content = content.replace("babase.getmaps", "bs.app.classic.getmaps")
 content = content.replace("babase.cameraflash", "bs.cameraflash")
 content = content.replace("babase.getmodel", "bs.getmesh")
-content = content.replace("babase.Map", "bs.Map")
-content = content.replace("babase._map", "bs._map")
+content = content.replace("babase.Map", "bascenev1.Map")
+content = content.replace("babase.DeathType", "bs.DeathType")
+content = content.replace("babase.GameActivity", "bascenev1.GameActivity")
+content = content.replace("_babase.app.stress_test_reset_timer", "_babase.app.classic.stress_test_reset_timer")
+content = content.replace("babase.app.stress_test_reset_timer", "_babase.app.classic.stress_test_reset_timer")
+content = content.replace("babase._map", "bascenev1._map")
+content = content.replace("babase._session.", "bascenev1._session.")
+content = content.replace("babase._activity", "bascenev1._activity")
+content = content.replace("_babase.get_client_public_device_uuid", "_bascenev1.get_client_public_device_uuid")
+content = content.replace("babase.PickedUpMessage", "bs.PickedUpMessage")
+content = content.replace("babase.PowerupMessage", "bs.PowerupMessage")
+content = content.replace("babase.FreezeMessage", "bs.FreezeMessage")
+content = content.replace("with babase.ContextRef(activity):", "with activity.context:")
+content = content.replace("babase.Context", "babase.ContextRef")
+content = content.replace("babase._dualteamsession", "bascenev1._dualteamsession")
+content = content.replace("babase._freeforallsession", "bascenev1._freeforallsession")
+content = content.replace("babase._multiteamsession", "bascenev1._multiteamsession")
+content = content.replace("babase._gameactivity", "bascenev1._gameactivity")
+content = content.replace("babase._powerup", "bascenev1._powerup")
+content = content.replace("babase.Chooser", "bascenev1.Chooser")
+content = content.replace("babase._lobby", "bascenev1._lobby")
+content = content.replace("babase._stats", "bascenev1._stats")
+content = content.replace("babase._team", "bascenev1._team")
+content = content.replace("PlayerType", "PlayerT")
+content = content.replace("babase.app.spaz_appearances", "babase.app.classic.spaz_appearances")
+content = content.replace("babase._coopsession", "bascenev1._coopsession")
+content = content.replace("babase._servermode", "baclassic._servermode")
+content = content.replace("_babase.app.server", "babase.app.classic.server")
+content = content.replace("_babase.chatmessage", "bascenev1.chatmessage")
+content = content.replace("_babase.disconnect_client", "_bascenev1.disconnect_client")
+content = content.replace("_babase.get_game_roster", "bs.get_game_roster")
+content = content.replace("_babase.get_public_party_max_size", "bs.get_public_party_max_size")
 content = content.replace("model", "mesh")
+content = content.replace("TimeType.REAL", "use `bs.apptimer` instead")
 
 content = content.replace("babase.Window", "bui.Window")
 content = content.replace("babase.Widget", "bui.Widget")
@@ -127,10 +160,11 @@ content = content.replace("bastd.ui", "bauiv1lib")
 content = content.replace("bastd", "bascenev1lib")
 content = content.replace("timetype=","")
 content = content.replace("babase.columnwidget", "bui.columnwidget")
+content = content.replace("_babase.get_game_port", "bs.get_game_port")
 content = content.replace("_babase.get_chat_messages", "bs.get_chat_messages")
 content = content.replace("_babase.get_foreground_host_session","bs.get_foreground_host_session")
 content = content.replace("_babase.get_foreground_host_activity","bs.get_foreground_host_activity")
 content = re.sub(r'bs\.Timer\(([^)]*)\bTimeType\.REAL\b([^)]*)\)', r'babase.AppTimer(\1\2)', content)
 
-with open(sys.argv[1], "w") as f:
+with open(sys.argv[2], "w") as f:
     f.write(content)
