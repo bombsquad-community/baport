@@ -40,6 +40,7 @@ if sys.argv[1] == "client":
     content = content.replace("babase.getcollisionmesh", "bui.getcollisionmesh")
 else:
 ## For transmission:
+    content = content.replace("_babase.screenmessage", "bs.broadcastmessage")
     content = content.replace("babase.screenmessage", "bs.broadcastmessage")
     content = content.replace("babase.getsound", "bs.getsound")
     content = content.replace("_babase.gettexture", "bs.gettexture")
@@ -118,8 +119,9 @@ content = content.replace("_babase.chatmessage", "bascenev1.chatmessage")
 content = content.replace("_babase.disconnect_client", "_bascenev1.disconnect_client")
 content = content.replace("_babase.get_game_roster", "bs.get_game_roster")
 content = content.replace("_babase.get_public_party_max_size", "bs.get_public_party_max_size")
+content = content.replace("babase._playlist", "bascenev1._playlist")
 content = content.replace("model", "mesh")
-content = content.replace("TimeType.REAL", "use `bs.apptimer` instead")
+content = content.replace("TimeType.REAL", "use `bs.apptimer` in `activity.context` instead")
 
 content = content.replace("babase.Window", "bui.Window")
 content = content.replace("babase.Widget", "bui.Widget")
