@@ -48,6 +48,8 @@ else:
     content = content.replace("babase.getmesh", "bs.getmesh")
     content = content.replace("babase.getcollisionmesh", "bs.getcollisionmesh")
 ###################################################################################
+content = content.replace("babase.getcollidemesh", "bs.getcollisionmesh")
+content = content.replace("collide_mesh", "collision_mesh")
 content = content.replace("babase.open_url", "bui.open_url")
 content = content.replace("babase.IntSetting", "bs.IntSetting")
 content = content.replace("babase.IntChoiceSetting", "bs.IntChoiceSetting")
