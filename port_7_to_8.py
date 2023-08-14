@@ -126,6 +126,8 @@ content = content.replace("_babase.new_host_session", "bascenev1.new_host_sessio
 content = content.replace("babase._playlist", "bascenev1._playlist")
 content = content.replace("model", "mesh")
 content = content.replace("TimeType.REAL", "use `bs.apptimer` in `activity.context` instead")
+content = content.replace("_babase.app.coop_session_args", "babase.app.classic.coop_session_args")
+content = content.replace("_babase.app.campaigns", "babase.app.classic.campaigns")
 
 content = content.replace("babase.Window", "bui.Window")
 content = content.replace("babase.Widget", "bui.Widget")
