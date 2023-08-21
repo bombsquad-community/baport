@@ -175,6 +175,10 @@ content = content.replace("_babase.get_chat_messages", "bascenev1.get_chat_messa
 content = content.replace("_babase.get_foreground_host_session", "bascenev1.get_foreground_host_session")
 content = content.replace("_babase.get_foreground_host_activity", "bascenev1.get_foreground_host_activity")
 content = content.replace("bascenev1.SessionPlayerNotFoundError", "babase.SessionPlayerNotFoundError")
+content = content.replace("bascenev1", "bs")
+content = content.replace("bauiv1", "bui")
+content = content.replace("import bs", "import bascenev1 as bs")
+content = content.replace("import bui", "import bauiv1 as bui")
 
 content = re.sub(r'bascenev1\.Timer\(([^)]*)\bTimeType\.REAL\b([^)]*)\)', r'babase.AppTimer(\1\2)', content)
 
