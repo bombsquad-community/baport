@@ -129,6 +129,7 @@ content = content.replace("TimeType.REAL", "use `bs.apptimer` in `activity.conte
 content = content.replace("_babase.app.coop_session_args", "babase.app.classic.coop_session_args")
 content = content.replace("_babase.app.campaigns", "babase.app.classic.campaigns")
 
+content = content.replace("_babase.newactivity", "bs.newactivity")
 content = content.replace("babase.Window", "bui.Window")
 content = content.replace("babase.Widget", "bui.Widget")
 content = content.replace("babase.widget", "bui.widget")
