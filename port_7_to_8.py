@@ -181,6 +181,8 @@ content = content.replace("import bs", "import bascenev1 as bs")
 content = content.replace("import bui", "import bauiv1 as bui")
 content = content.replace("bslib", "bascenev1lib")
 content = content.replace("builib", "bauiv1lib")
+content = content.replace("from bs.", "from bascenev1.")
+content = content.replace("from bui.", "from bauiv1.")
 
 content = re.sub(r'bs\.Timer\(([^)]*)\bTimeType\.REAL\b([^)]*)\)', r'babase.AppTimer(\1\2)', content)
 
