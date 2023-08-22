@@ -142,7 +142,7 @@ content = content.replace("babase.imagewidget", "bauiv1.imagewidget")
 content = content.replace("_babase.set_public_party_max_size", "bascenev1.set_public_party_max_size")
 content = content.replace("_bauiv1", "bauiv1")
 # Converting `ba.playsound(abc)` to `abc.play()` is tricky.
-# Do it manually in case regex subascenev1titution fails.
+# Do it manually in case regex substitution fails.
 content = re.sub(
     r'babase\.playsound\(\s*([^,\n]+),\s*([^,\n]+),\s*position=([^,\n]+)\)',
     r'\1.play(\2, position=\3)',
@@ -180,7 +180,7 @@ content = content.replace("bauiv1", "bui")
 content = content.replace("import bs", "import bascenev1 as bs")
 content = content.replace("import bui", "import bauiv1 as bui")
 
-content = re.sub(r'bascenev1\.Timer\(([^)]*)\bTimeType\.REAL\b([^)]*)\)', r'babase.AppTimer(\1\2)', content)
+content = re.sub(r'bs\.Timer\(([^)]*)\bTimeType\.REAL\b([^)]*)\)', r'babase.AppTimer(\1\2)', content)
 
 with open(sys.argv[2], "w") as f:
     f.write(content)
