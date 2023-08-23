@@ -163,6 +163,7 @@ content = content.replace("_babase.add_transaction", "bauiv1.app.plus.add_v1_acc
 content = content.replace("_babase.run_transactions", "bauiv1.app.plus.run_v1_account_transactions")
 content = content.replace("babase._store.get_store_layout", "bauiv1.app.classic.store.get_store_layout")
 content = content.replace("babase.internal.get_store_layout", "bauiv1.app.classic.store.get_store_layout")
+content = content.replace("babase.internal.connect_to_party", "bascenev1.connect_to_party")
 
 content = content.replace("babase._store", "")
 content = content.replace("babase.internal", "")
