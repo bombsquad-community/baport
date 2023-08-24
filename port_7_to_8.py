@@ -32,7 +32,9 @@ else:
 content = content.replace("# ba_meta require api 7", "# ba_meta require api 8")
 content = content.replace("# ba_meta export game", "# ba_meta export bascenev1.GameActivity")
 
+
 content = content.replace("user_agent_string", "legacy_user_agent_string")
+content = re.sub(r'^(import\s+[\w]+(,[\w]+)+)', lambda match: match.group().replace(',', '\nimport '), content, flags=re.MULTILINE)
 content = content.replace("_ba.", "_babase.")
 content = content.replace("_ba.", "_babase.")
 content = content.replace("ba.", "babase.")
