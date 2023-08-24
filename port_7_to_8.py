@@ -158,6 +158,7 @@ content = content.replace("babase.buttonwidget", "bauiv1.buttonwidget")
 content = content.replace("babase.textwidget", "bauiv1.textwidget")
 content = content.replace("babase.checkboxwidget", "bauiv1.checkboxwidget")
 content = content.replace("babase.imagewidget", "bauiv1.imagewidget")
+content = content.replace("babase.uicleanupcheck", "bauiv1.uicleanupcheck")
 content = content.replace("_babase.set_public_party_max_size", "bascenev1.set_public_party_max_size")
 content = content.replace("_bauiv1", "bauiv1")
 # Converting `ba.playsound(abc)` to `abc.play()` is tricky.
