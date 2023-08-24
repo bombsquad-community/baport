@@ -7,10 +7,27 @@
 
 import re
 import sys
+import codecs 
 
-with open(sys.argv[2], "rb") as fin:
-    print("Porting "+ sys.argv[2])
-    content = fin.read().decode("utf-8")
+def detect_encoding(filename):
+    encodings = ['utf-8', 'latin-1', 'ascii', 'cp1252']
+    for encoding in encodings:
+        try:
+            with open(filename, 'rb') as f:
+                f.read().decode(encoding)
+            return encoding
+        except UnicodeDecodeError:
+            pass
+    return None
+
+filename = sys.argv[2]
+encoding = detect_encoding(filename)
+if encoding:
+    with open(filename, 'r', encoding=encoding) as f:
+        print("Porting "+ sys.argv[2])
+        content = f.read()
+else:
+    print('Could not detect encoding')
 
 content = content.replace("# ba_meta require api 7", "# ba_meta require api 8")
 content = content.replace("# ba_meta export game", "# ba_meta export bascenev1.GameActivity")
@@ -19,12 +36,15 @@ content = content.replace("user_agent_string", "legacy_user_agent_string")
 content = content.replace("_ba.", "_babase.")
 content = content.replace("ba.", "babase.")
 content = content.replace("import _ba", "import _babase")
-# content = content.replace("ba ,", "babase ,")
-# content = content.replace("ba,", "babase,")
-# content = content.replace("_ba ,", "_babase ,")
-# content = content.replace("_ba,", "_babase,")
-# content = content.replace("bastd ,", "bascenev1lib ,")
-# content = content.replace("bastd,", "bascenev1lib,")
+content = content.replace("ba ,", "babase ,")
+content = content.replace("ba,", "babase,")
+content = content.replace("_ba ,", "_babase ,")
+content = content.replace("_ba,", "_babase,")
+content = content.replace("bastd ,", "bascenev1lib ,")
+content = content.replace("bastd,", "bascenev1lib,")
+content = content.replace("from ba ", "from babase ")
+content = content.replace("from bastd ", "from bascenev1lib ")
+content = content.replace("from _ba ", "from _babase ")
 content = re.sub(r'\bimport _ba\b', "import _babase", content)
 content = re.sub(r'\bimport ba(\b|\.(\w+))', "import babase\nimport bauiv1\nimport bascenev1", content)
 content = content.replace("babase.app.ui", "bauiv1.app.ui_v1")
@@ -342,11 +362,7 @@ content = content.replace("from bui.", "from bauiv1.")
 
 content = re.sub(r'bs\.Timer\(([^)]*)\bTimeType\.REAL\b([^)]*)\)', r'babase.AppTimer(\1\2)', content)
 
-try:
-    with open(sys.argv[2], "w") as f:
-        f.write(content)
-except:
-    with open(sys.argv[2], "w",  encoding='utf-8') as f:
-        f.write(content)
+with open(sys.argv[2], "w",  encoding=encoding) as f:
+    f.write(content)
 
 
