@@ -34,7 +34,7 @@ content = content.replace("# ba_meta export game", "# ba_meta export bascenev1.G
 
 
 content = content.replace("user_agent_string", "legacy_user_agent_string")
-content = re.sub(r'^(import\s+[\w]+(,[\w]+)+)', lambda match: match.group().replace(',', '\nimport '), content, flags=re.MULTILINE)
+content = re.sub(r'^(import\s+[\w]+(\s*,\s*[\w]+)+)', lambda match: re.sub(r'\s*,\s*', '\nimport ', match.group()), content, flags=re.MULTILINE)
 content = content.replace("_ba.", "_babase.")
 content = content.replace("_ba.", "_babase.")
 content = content.replace("ba.", "babase.")
