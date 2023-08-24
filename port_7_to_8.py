@@ -17,7 +17,7 @@ content = content.replace("# ba_meta export game", "# ba_meta export bascenev1.G
 
 content = content.replace("user_agent_string", "legacy_user_agent_string")
 content = content.replace("_ba.", "_babase.")
-content = content.replace("_ba.", "_babase.")
+content = content.replace("ba", "babase")
 content = content.replace("ba.", "babase.")
 content = content.replace("import _ba", "import _babase")
 content = re.sub(r'\bimport _ba\b', "import _babase", content)
