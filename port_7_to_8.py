@@ -361,6 +361,7 @@ content = content.replace("bslib", "bascenev1lib")
 content = content.replace("builib", "bauiv1lib")
 content = content.replace("from bs.", "from bascenev1.")
 content = content.replace("from bui.", "from bauiv1.")
+content = content.replace("# ba_meta export bs.GameActivity", "# ba_meta export bascenev1.GameActivity")
 
 content = re.sub(r'bs\.Timer\(([^)]*)\bTimeType\.REAL\b([^)]*)\)', r'babase.AppTimer(\1\2)', content)
 
