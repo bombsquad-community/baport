@@ -163,6 +163,7 @@ content = content.replace("babase.imagewidget", "bauiv1.imagewidget")
 content = content.replace("babase.uicleanupcheck", "bauiv1.uicleanupcheck")
 content = content.replace("_babase.set_public_party_max_size", "bascenev1.set_public_party_max_size")
 content = content.replace("_bauiv1", "bauiv1")
+content = content.replace("babase.show_damage_count", "bascenev1.show_damage_count")
 # Converting `ba.playsound(abc)` to `abc.play()` is tricky.
 # Do it manually in case regex substitution fails.
 content = re.sub(
