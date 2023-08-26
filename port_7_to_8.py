@@ -174,6 +174,9 @@ content = content.replace("babase._gameutils", "bascenev1._gameutils")
 content = content.replace("babase.time(timeformat=ba.TimeFormat.MILLISECONDS)", "bascenev1.time() * 1000.0")
 content = content.replace("babase.TimeFormat.MILLISECONDS)", "Divide or multiply the by 1000 eg(bs.Timer(15000//1000,...)")
 content = content.replace("babase.camerashake", "bascenev1.camerashake")
+content = content.replace("babase.app.add_coop_practice_level", "babase.app.classic.add_coop_practice_level")
+content = content.replace("babase._campaign", "bascenev1._campaign")
+content = content.replace("babase.Level", "bascenev1._level.Level")
 # Converting `ba.playsound(abc)` to `abc.play()` is tricky.
 # Do it manually in case regex substitution fails.# Do it manually in case regex substitution fails. Are you sure!!
 content = re.sub(
