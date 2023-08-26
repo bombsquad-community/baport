@@ -169,9 +169,19 @@ content = content.replace("_bauiv1", "bauiv1")
 content = content.replace("babase.show_damage_count", "bascenev1.show_damage_count")
 content = content.replace("babase._gameutils", "bascenev1._gameutils")
 content = content.replace("babase.StandMessage", "bascenev1.StandMessage")
+content = content.replace("babase.PowerupAcceptMessage", "bascenev1.PowerupAcceptMessage")
+content = content.replace("babase._gameutils", "bascenev1._gameutils")
+content = content.replace("babase.time(timeformat=ba.TimeFormat.MILLISECONDS)", "bascenev1.time() * 1000.0")
+content = content.replace("babase.TimeFormat.MILLISECONDS)", "Divide or multiply the by 1000 eg(bs.Timer(15000//1000,...)")
 content = content.replace("babase.camerashake", "bascenev1.camerashake")
 # Converting `ba.playsound(abc)` to `abc.play()` is tricky.
-# Do it manually in case regex substitution fails.
+# Do it manually in case regex substitution fails.# Do it manually in case regex substitution fails. Are you sure!!
+content = re.sub(
+    r'babase\.playsound\(\s*([^,\n]+),\s*([^,\n]+)\)',
+    r'\1.play(\2)',
+    content,
+    flags=re.MULTILINE
+)
 content = re.sub(
     r'babase\.playsound\(\s*([^,\n]+),\s*([^,\n]+),\s*position=([^,\n]+)\)',
     r'\1.play(\2, position=\3)',
