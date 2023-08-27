@@ -39,6 +39,8 @@ content = content.replace("_ba.", "_babase.")
 content = content.replace("_ba.", "_babase.")
 content = content.replace("ba.", "babase.")
 content = content.replace("import _ba", "import _babase")
+content = content.replace("from ba import", "from babase import")
+content = content.replace("from _ba import", "from _babase import")
 content = re.sub(r'\bimport _ba\b', "import _babase", content)
 content = re.sub(r'\bimport ba(\b|\.(\w+))', "import babase\nimport bauiv1\nimport bascenev1", content)
 content = content.replace("babase.app.ui", "bauiv1.app.ui_v1")
@@ -86,9 +88,12 @@ content = content.replace("babase.animate", "bascenev1.animate")
 content = content.replace("babase.FreeForAllSession", "bascenev1.FreeForAllSession")
 content = content.replace("babase.DualTeamSession", "bascenev1.DualTeamSession")
 content = content.replace("babase.MultiTeamSession", "bascenev1.MultiTeamSession")
+content = content.replace("babase.EndSession", "bascenev1.EndSession")
+content = content.replace("babase.CoopSession", "bascenev1.CoopSession")
 content = content.replace("babase.TeamGameActivity", "bascenev1.TeamGameActivity")
 content = content.replace("babase.Team", "bascenev1.Team")
 content = content.replace("babase.Session", "bascenev1.Session")
+content = content.replace("babase.getsession", "bascenev1.getsession")
 content = content.replace("babase.Material", "bascenev1.Material")
 content = content.replace("babase.WeakCall", "bascenev1.WeakCall")
 content = content.replace("babase.DieMessage", "bascenev1.DieMessage")
@@ -161,8 +166,25 @@ content = content.replace("babase.imagewidget", "bauiv1.imagewidget")
 content = content.replace("babase.uicleanupcheck", "bauiv1.uicleanupcheck")
 content = content.replace("_babase.set_public_party_max_size", "bascenev1.set_public_party_max_size")
 content = content.replace("_bauiv1", "bauiv1")
+content = content.replace("babase.show_damage_count", "bascenev1.show_damage_count")
+content = content.replace("babase._gameutils", "bascenev1._gameutils")
+content = content.replace("babase.StandMessage", "bascenev1.StandMessage")
+content = content.replace("babase.PowerupAcceptMessage", "bascenev1.PowerupAcceptMessage")
+content = content.replace("babase._gameutils", "bascenev1._gameutils")
+content = content.replace("babase.time(timeformat=ba.TimeFormat.MILLISECONDS)", "bascenev1.time() * 1000.0")
+content = content.replace("babase.TimeFormat.MILLISECONDS)", "Divide or multiply the by 1000 eg(bs.Timer(15000//1000,...)")
+content = content.replace("babase.camerashake", "bascenev1.camerashake")
+content = content.replace("babase.app.add_coop_practice_level", "babase.app.classic.add_coop_practice_level")
+content = content.replace("babase._campaign", "bascenev1._campaign")
+content = content.replace("babase.Level", "bascenev1._level.Level")
 # Converting `ba.playsound(abc)` to `abc.play()` is tricky.
-# Do it manually in case regex substitution fails.
+# Do it manually in case regex substitution fails.# Do it manually in case regex substitution fails. Are you sure!!
+content = re.sub(
+    r'babase\.playsound\(\s*([^,\n]+),\s*([^,\n]+)\)',
+    r'\1.play(\2)',
+    content,
+    flags=re.MULTILINE
+)
 content = re.sub(
     r'babase\.playsound\(\s*([^,\n]+),\s*([^,\n]+),\s*position=([^,\n]+)\)',
     r'\1.play(\2, position=\3)',
@@ -357,6 +379,9 @@ content = content.replace("bslib", "bascenev1lib")
 content = content.replace("builib", "bauiv1lib")
 content = content.replace("from bs.", "from bascenev1.")
 content = content.replace("from bui.", "from bauiv1.")
+content = content.replace("import bascenev1 as bascenev1lib", "import bascenev1lib")
+content = content.replace("import bauiv1 as bauiv1lib", "import bauiv1lib")
+content = content.replace("# ba_meta export bs.GameActivity", "# ba_meta export bascenev1.GameActivity")
 
 content = re.sub(r'bs\.Timer\(([^)]*)\bTimeType\.REAL\b([^)]*)\)', r'babase.AppTimer(\1\2)', content)
 
