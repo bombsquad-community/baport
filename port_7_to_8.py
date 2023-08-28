@@ -185,6 +185,7 @@ content = content.replace("babase._campaign", "bascenev1._campaign")
 content = content.replace("babase.Level", "bascenev1._level.Level")
 content = content.replace("_babase.app.platform", "_babase.app.classic.platform")
 content = content.replace("babase.app.cloud.send_message_cb", "bauiv1.app.plus.cloud.send_message_cb")
+content = content.replace("_babase.get_special_widget", "bauiv1.get_special_widget")
 # Converting `ba.playsound(abc)` to `abc.play()` is tricky.
 # Do it manually in case regex substitution fails.# Do it manually in case regex substitution fails. Are you sure!!
 content = re.sub(
