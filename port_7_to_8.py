@@ -5,9 +5,9 @@
 # To:
 # with _ba.foreground_host_activity().context:
 #
-# babase.time(timeformat=ba.TimeFormat.MILLISECONDS)
+# ba.time(timeformat=ba.TimeFormat.MILLISECONDS)
 # To:
-# babase.time() * 1000
+# ba.time() * 1000
 #
 # ba.Timer((POWERUP_WEAR_OFF_TIME - 2000),ba.WeakCall(self._multi_bomb_wear_off_flash),timeformat=ba.TimeFormat.MILLISECONDS)
 # To:
