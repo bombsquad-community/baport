@@ -183,10 +183,12 @@ content = content.replace("babase.camerashake", "bascenev1.camerashake")
 content = content.replace("babase.app.add_coop_practice_level", "babase.app.classic.add_coop_practice_level")
 content = content.replace("babase._campaign", "bascenev1._campaign")
 content = content.replace("babase.Level", "bascenev1._level.Level")
-content = content.replace("_babase.app.platform", "_babase.app.classic.platform")
 content = content.replace("babase.app.cloud.send_message_cb", "bauiv1.app.plus.cloud.send_message_cb")
 content = content.replace("_babase.get_special_widget", "bauiv1.get_special_widget")
-content = content.replace("_babase.getlog", "_babase.get_v1_cloud_log")
+
+content = content.replace(".app.platform", ".app.classic.platform")
+content = content.replace(".app.subplatform", ".app.classic.subplatform")
+content = content.replace(".getlog", ".get_v1_cloud_log")
 # Converting `ba.playsound(abc)` to `abc.play()` is tricky.
 # Do it manually in case regex substitution fails.# Do it manually in case regex substitution fails. Are you sure!!
 content = re.sub(
