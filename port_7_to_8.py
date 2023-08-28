@@ -4,6 +4,14 @@
 # with ba.Context(_ba.foreground_host_activity()):
 # To:
 # with _ba.foreground_host_activity().context:
+#
+# ba.time(timeformat=ba.TimeFormat.MILLISECONDS)
+# To:
+# ba.time() * 1000
+#
+# ba.Timer((POWERUP_WEAR_OFF_TIME - 2000),ba.WeakCall(self._multi_bomb_wear_off_flash),timeformat=ba.TimeFormat.MILLISECONDS)
+# To:
+# ba.Timer((POWERUP_WEAR_OFF_TIME - 2000 / 1000),ba.WeakCall(self._multi_bomb_wear_off_flash))
 
 import re
 import sys
@@ -171,12 +179,16 @@ content = content.replace("babase._gameutils", "bascenev1._gameutils")
 content = content.replace("babase.StandMessage", "bascenev1.StandMessage")
 content = content.replace("babase.PowerupAcceptMessage", "bascenev1.PowerupAcceptMessage")
 content = content.replace("babase._gameutils", "bascenev1._gameutils")
-content = content.replace("babase.time(timeformat=ba.TimeFormat.MILLISECONDS)", "bascenev1.time() * 1000.0")
-content = content.replace("babase.TimeFormat.MILLISECONDS)", "Divide or multiply the by 1000 eg(bs.Timer(15000//1000,...)")
 content = content.replace("babase.camerashake", "bascenev1.camerashake")
 content = content.replace("babase.app.add_coop_practice_level", "babase.app.classic.add_coop_practice_level")
 content = content.replace("babase._campaign", "bascenev1._campaign")
 content = content.replace("babase.Level", "bascenev1._level.Level")
+content = content.replace("babase.app.cloud.send_message_cb", "bauiv1.app.plus.cloud.send_message_cb")
+content = content.replace("_babase.get_special_widget", "bauiv1.get_special_widget")
+
+content = content.replace(".app.platform", ".app.classic.platform")
+content = content.replace(".app.subplatform", ".app.classic.subplatform")
+content = content.replace(".getlog", ".get_v1_cloud_log")
 # Converting `ba.playsound(abc)` to `abc.play()` is tricky.
 # Do it manually in case regex substitution fails.# Do it manually in case regex substitution fails. Are you sure!!
 content = re.sub(
@@ -384,8 +396,8 @@ content = content.replace("import bauiv1 as bauiv1lib", "import bauiv1lib")
 content = content.replace("# ba_meta export bs.GameActivity", "# ba_meta export bascenev1.GameActivity")
 
 content = re.sub(r'bs\.Timer\(([^)]*)\bTimeType\.REAL\b([^)]*)\)', r'babase.AppTimer(\1\2)', content)
-
+trademark = "# Porting to api 8 made easier by baport.(https://github.com/bombsquad-community/baport)\n"
 with open(sys.argv[2], "w",  encoding=encoding) as f:
-    f.write(content)
+    f.write(trademark + content)
 
 
