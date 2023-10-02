@@ -37,7 +37,7 @@ if encoding:
 else:
     print('Could not detect encoding')
 
-content = content.replace("# ba_meta require api 7", "# ba_meta require api 8\n from baenv import TARGET_BALLISTICA_BUILD as build_number")
+content = content.replace("# ba_meta require api 7", "# ba_meta require api 8")
 content = content.replace("# ba_meta export game", "# ba_meta export bascenev1.GameActivity")
 
 
@@ -51,6 +51,10 @@ content = content.replace("from ba import", "from babase import")
 content = content.replace("from _ba import", "from _babase import")
 content = re.sub(r'\bimport _ba\b', "import _babase", content)
 content = re.sub(r'\bimport ba(\b|\.(\w+))', "import babase\nimport bauiv1\nimport bascenev1", content)
+match = re.search(r'^(import\s+[\w]+(\s*,\s*[\w]+)*)', content, flags=re.MULTILINE)
+if match:
+    first_import_index = match.start()
+    content = content[:first_import_index] + 'from baenv import TARGET_BALLISTICA_BUILD as build_number\n' + content[first_import_index:]
 content = content.replace("babase.app.ui", "bauiv1.app.ui_v1")
 content = content.replace("babase.app.accounts_v1", "bauiv1.app.classic.accounts")
 
