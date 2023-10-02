@@ -37,7 +37,7 @@ if encoding:
 else:
     print('Could not detect encoding')
 
-content = content.replace("# ba_meta require api 7", "# ba_meta require api 8")
+content = content.replace("# ba_meta require api 7", "# ba_meta require api 8\n from baenv import TARGET_BALLISTICA_BUILD as build_number")
 content = content.replace("# ba_meta export game", "# ba_meta export bascenev1.GameActivity")
 
 
