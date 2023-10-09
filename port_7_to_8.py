@@ -400,7 +400,6 @@ content = content.replace("import bauiv1 as bauiv1lib", "import bauiv1lib")
 content = content.replace("# ba_meta export bs.GameActivity", "# ba_meta export bascenev1.GameActivity")
 
 # Depracations
-content = content.replace("babase.app.", "babase.app if build_number < 21282 else babase.app.env")
 content = content.replace("babase.app.build_number", "babase.app.build_number if build_number < 21282 else babase.app.env.build_number")
 content = content.replace("babase.app.device_name", "babase.app.device_name if build_number < 21282 else babase.app.env.device_name")
 content = content.replace("babase.app.config_file_path", "babase.app.config_file_path if build_number < 21282 else babase.app.env.config_file_path")
