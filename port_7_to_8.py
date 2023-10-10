@@ -52,9 +52,11 @@ content = content.replace("from _ba import", "from _babase import")
 content = re.sub(r'\bimport _ba\b', "import _babase", content)
 content = re.sub(r'\bimport ba(\b|\.(\w+))', "import babase\nimport bauiv1\nimport bascenev1", content)
 match = re.search(r'^(import\s+[\w]+(\s*,\s*[\w]+)*)', content, flags=re.MULTILINE)
-if match:
-    first_import_index = match.start()
-    content = content[:first_import_index] + 'from baenv import TARGET_BALLISTICA_BUILD as build_number\n' + content[first_import_index:]
+affected_methods = ["build_number", "device_name", "config_file_path", "version", "debug_build", "test_build", "data_directory", "python_directory_user", "python_directory_app", "python_directory_app_site", "api_version", "on_tv", "vr_mode","toolbar_test", "arcade_test", "headless_mode", "demo_mode", "protocol_version"]
+for word in affected_methods:
+    if f".{word}" in content:
+        first_import_index = match.start()
+        content = content[:first_import_index] + 'from baenv import TARGET_BALLISTICA_BUILD as build_number\n' + content[first_import_index:]
 content = content.replace("babase.app.ui", "bauiv1.app.ui_v1")
 content = content.replace("babase.app.accounts_v1", "bauiv1.app.classic.accounts")
 
