@@ -52,7 +52,7 @@ content = content.replace("from _ba import", "from _babase import")
 content = re.sub(r'\bimport _ba\b', "import _babase", content)
 content = re.sub(r'\bimport ba(\b|\.(\w+))', "import babase\nimport bauiv1\nimport bascenev1", content)
 match = re.search(r'^(import\s+[\w]+(\s*,\s*[\w]+)*)', content, flags=re.MULTILINE)
-affected_methods = ["build_number", "device_name", "config_file_path", "version", "debug_build", "test_build", "data_directory", "python_directory_user", "python_directory_app", "python_directory_app_site", "api_version", "on_tv", "vr_mode","toolbar_test", "arcade_test", "headless_mode", "demo_mode", "protocol_version"]
+affected_methods = ["build_number", "device_name", "config_file_path", "version", "debug_build", "test_build", "data_directory", "python_directory_user", "python_directory_app", "python_directory_app_site", "api_version", "on_tv", "vr_mode","toolbar_test", "arcade_test", "headless_mode", "demo_mode", "protocol_version", "get_connection_to_host_info"]
 for word in affected_methods:
     if f".{word}" in content:
         first_import_index = match.start()
@@ -197,6 +197,7 @@ content = content.replace(".app.subplatform", ".app.classic.subplatform")
 content = content.replace(".getlog", ".get_v1_cloud_log")
 # Converting `ba.playsound(abc)` to `abc.play()` is tricky.
 # Do it manually in case regex substitution fails.# Do it manually in case regex substitution fails. Are you sure!!
+#! FIXME May cause syntax warning on 3.12
 content = re.sub(
     r'babase\.playsound\(\s*([^,\n]+),\s*([^,\n]+)\)',
     r'\1.play(\2)',
@@ -366,6 +367,21 @@ content = content.replace("babase.internal.value_test", "bauiv1.app.classic.valu
 content = content.replace("babase.internal.workspaces_in_use", "babase.workspaces_in_use")
 content = content.replace("babase.internal.dump_tracebacks", "babase._apputils.dump_app_state")
 content = content.replace("babase.internal.show_app_invite", "_bauiv1.show_app_invite")
+content = content.replace("babase._generated", "babase._mgen")
+content = content.replace("_babase.disconnect_from_host", "bascenev1.disconnect_from_host")
+content = content.replace("babase.disconnect_from_host", "bascenev1.disconnect_from_host")
+content = content.replace("_babase.connect_to_party", "bascenev1.connect_to_party")
+content = content.replace("babase.connect_to_party", "bascenev1.connect_to_party")
+content = content.replace("babase.set_party_window_open", "bauiv1.set_party_window_open")
+content = content.replace("babase.set_party_window_open", "bauiv1.set_party_window_open")
+content = content.replace("babase.getcollidemesh", "bascenev1.getcollisionmesh")
+content = content.replace("collide_mesh", "collision_mesh")
+content = content.replace("babase.FloatSetting", "bascenev1.FloatSetting")
+content = content.replace("babase.playsound", "bascenev1.playsound")
+#!
+
+
+
 
 # Removed in API 8:
 # content = content.replace("babase.internal.set_telnet_access_enabled", "")
@@ -377,6 +393,27 @@ content = content.replace("babase.internal.have_outstanding_transactions", "baui
 content = content.replace("babase.internal.get_public_login_id", "bauiv1.app.plus.get_v1_account_public_login_id")
 content = content.replace("babase.internal.get_input_map_hash", "bauiv1.app.classic.get_input_device_map_hash")
 content = content.replace("babase.internal.get_device_value", "bauiv1.app.classic.get_input_device_mapped_value")
+
+# Depracations
+content = content.replace("babase.app.build_number", "babase.app.build_number if build_number < 21282 else babase.app.env.build_number")
+content = content.replace("babase.app.device_name", "babase.app.device_name if build_number < 21282 else babase.app.env.device_name")
+content = content.replace("babase.app.config_file_path", "babase.app.config_file_path if build_number < 21282 else babase.app.env.config_file_path")
+content = content.replace("babase.app.version", "babase.app.version if build_number < 21282 else babase.app.env")
+content = content.replace("babase.app.debug_build", "babase.app.debug_build if build_number < 21282 else babase.app.env.debug_build")
+content = content.replace("babase.app.test_build", "babase.app.test_build if build_number < 21282 else babase.app.env.test_build")
+content = content.replace("babase.app.data_directory", "babase.app.data_directory if build_number < 21282 else babase.app.env.data_directory")
+content = content.replace("babase.app.python_directory_user", "babase.app.python_directory_user if build_number < 21282 else babase.app.env.python_directory_user")
+content = content.replace("babase.app.python_directory_app", "babase.app.env")
+content = content.replace("babase.app.python_directory_app_site", "babase.app.python_directory_app_site if build_number < 21282 else babase.app.env.python_directory_app_site")
+content = content.replace("babase.app.api_version", "babase.app.api_version if build_number < 21282 else babase.app.env.api_version")
+content = content.replace("babase.app.on_tv", "babase.app.on_tv if build_number < 21282 else babase.app.env.on_tv")
+content = content.replace("babase.app.vr_mode", "babase.app.vr_mode if build_number < 21282 else babase.app.env.vr")
+content = content.replace("babase.app.toolbar_test", "babase.app.toolbar_test if build_number < 21282 else babase.app.env.toolbar_test")
+content = content.replace("babase.app.arcade_mode", "babase.app.arcade_mode if build_number < 21282 else babase.app.env.arcade_mode")
+content = content.replace("babase.app.headless_mode", "babase.app.headless_mode if build_number < 21282 else babase.app.env.headless_mode")
+content = content.replace("babase.app.demo_mode", "babase.app.demo_mode if build_number < 21282 else babase.app.env.demo_mode")
+content = content.replace("babase.app.protocol_version", "babase.app.protocol_version if build_number < 21282 else babase.app.env.protocol_version")
+content = content.replace("bascenev1.get_connection_to_host_info", "bascenev1.get_connection_to_host_info if build_number < 21697 else bascenev1.get_connection_to_host_info_2")
 
 content = content.replace("babase._store", "bauiv1.app.classic.store")
 # content = content.replace("babase.internal", "")
@@ -400,26 +437,7 @@ content = content.replace("from bui.", "from bauiv1.")
 content = content.replace("import bascenev1 as bascenev1lib", "import bascenev1lib")
 content = content.replace("import bauiv1 as bauiv1lib", "import bauiv1lib")
 content = content.replace("# ba_meta export bs.GameActivity", "# ba_meta export bascenev1.GameActivity")
-
-# Depracations
-content = content.replace("babase.app.build_number", "babase.app.build_number if build_number < 21282 else babase.app.env.build_number")
-content = content.replace("babase.app.device_name", "babase.app.device_name if build_number < 21282 else babase.app.env.device_name")
-content = content.replace("babase.app.config_file_path", "babase.app.config_file_path if build_number < 21282 else babase.app.env.config_file_path")
-content = content.replace("babase.app.version", "babase.app.version if build_number < 21282 else babase.app.env")
-content = content.replace("babase.app.debug_build", "babase.app.debug_build if build_number < 21282 else babase.app.env.debug_build")
-content = content.replace("babase.app.test_build", "babase.app.test_build if build_number < 21282 else babase.app.env.test_build")
-content = content.replace("babase.app.data_directory", "babase.app.data_directory if build_number < 21282 else babase.app.env.data_directory")
-content = content.replace("babase.app.python_directory_user", "babase.app.python_directory_user if build_number < 21282 else babase.app.env.python_directory_user")
-content = content.replace("babase.app.python_directory_app", "babase.app.env")
-content = content.replace("babase.app.python_directory_app_site", "babase.app.python_directory_app_site if build_number < 21282 else babase.app.env.python_directory_app_site")
-content = content.replace("babase.app.api_version", "babase.app.api_version if build_number < 21282 else babase.app.env.api_version")
-content = content.replace("babase.app.on_tv", "babase.app.on_tv if build_number < 21282 else babase.app.env.on_tv")
-content = content.replace("babase.app.vr_mode", "babase.app.vr_mode if build_number < 21282 else babase.app.env.vr_mode")
-content = content.replace("babase.app.toolbar_test", "babase.app.toolbar_test if build_number < 21282 else babase.app.env.toolbar_test")
-content = content.replace("babase.app.arcade_mode", "babase.app.arcade_mode if build_number < 21282 else babase.app.env.arcade_mode")
-content = content.replace("babase.app.headless_mode", "babase.app.headless_mode if build_number < 21282 else babase.app.env.headless_mode")
-content = content.replace("babase.app.demo_mode", "babase.app.demo_mode if build_number < 21282 else babase.app.env.demo_mode")
-content = content.replace("babase.app.protocol_version", "babase.app.protocol_version if build_number < 21282 else babase.app.env.protocol_version")
+content = content.replace("_bs", "bs")
 
 content = re.sub(r'bs\.Timer\(([^)]*)\bTimeType\.REAL\b([^)]*)\)', r'babase.AppTimer(\1\2)', content)
 trademark = "# Porting to api 8 made easier by baport.(https://github.com/bombsquad-community/baport)\n"
