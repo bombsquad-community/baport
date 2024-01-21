@@ -413,7 +413,7 @@ content = content.replace("babase.app.arcade_mode", "babase.app.arcade_mode if b
 content = content.replace("babase.app.headless_mode", "babase.app.headless_mode if build_number < 21282 else babase.app.env.headless_mode")
 content = content.replace("babase.app.demo_mode", "babase.app.demo_mode if build_number < 21282 else babase.app.env.demo_mode")
 content = content.replace("babase.app.protocol_version", "babase.app.protocol_version if build_number < 21282 else babase.app.env.protocol_version")
-content = content.replace("bascenev1.get_connection_to_host_info", "bascenev1.get_connection_to_host_info if build_number < 21697 else bascenev1.get_connection_to_host_info_2")
+content = content.replace("bascenev1.get_connection_to_host_info", "bascenev1.get_connection_to_host_info if build_number < 21727 else bascenev1.get_connection_to_host_info_2")
 
 content = content.replace("babase._store", "bauiv1.app.classic.store")
 # content = content.replace("babase.internal", "")
