@@ -5,13 +5,13 @@
 # To:
 # with _ba.foreground_host_activity().context:
 #
-# ba.time(timeformat=ba.TimeFormat.MILLISECONDS)
-# To:
-# ba.time() * 1000
-#
 # ba.Timer((POWERUP_WEAR_OFF_TIME - 2000),ba.WeakCall(self._multi_bomb_wear_off_flash),timeformat=ba.TimeFormat.MILLISECONDS)
 # To:
 # ba.Timer((POWERUP_WEAR_OFF_TIME - 2000 / 1000),ba.WeakCall(self._multi_bomb_wear_off_flash))
+#
+# ba.playsound(self._dingsound if importance == 1 else self._dingsoundhigh, volume=0.6)
+# To:
+# self._dingsound.play(volume=0.6) if importance == 1 else self._dingsoundhigh.play(volume=0.6)
 
 import re
 import sys
@@ -39,6 +39,12 @@ else:
 
 content = content.replace("# ba_meta require api 7", "# ba_meta require api 8")
 content = content.replace("# ba_meta export game", "# ba_meta export bascenev1.GameActivity")
+# Api 6 support
+content = content.replace("# ba_meta require api 6", "# ba_meta require api 8")
+content = content.replace("on_app_launch", "__init__")
+content = content.replace("ba._enums", "ba._generated.enums") 
+content = content.replace("get_account", "get_v1_account")                          
+                
 
 
 content = content.replace("user_agent_string", "legacy_user_agent_string")
@@ -57,6 +63,7 @@ for word in affected_methods:
     if f".{word}" in content:
         first_import_index = match.start()
         content = content[:first_import_index] + 'from baenv import TARGET_BALLISTICA_BUILD as build_number\n' + content[first_import_index:]
+        break
 content = content.replace("babase.app.ui", "bauiv1.app.ui_v1")
 content = content.replace("babase.app.accounts_v1", "bauiv1.app.classic.accounts")
 
@@ -218,6 +225,9 @@ content = re.sub(
 )
 content = re.sub("babase\.playsound\((.*)\)", "\\1.play()", content)
 
+# Removed in API 8:
+# content = content.replace("babase.internal.set_telnet_access_enabled", "")
+
 content = content.replace("babase.internal.add_transaction", "bauiv1.app.plus.add_v1_account_transaction")
 content = content.replace("babase.internal.run_transaction", "bauiv1.app.plus.run_v1_account_transaction")
 content = content.replace("_babase.add_transaction", "bauiv1.app.plus.add_v1_account_transaction")
@@ -367,6 +377,16 @@ content = content.replace("babase.internal.value_test", "bauiv1.app.classic.valu
 content = content.replace("babase.internal.workspaces_in_use", "babase.workspaces_in_use")
 content = content.replace("babase.internal.dump_tracebacks", "babase._apputils.dump_app_state")
 content = content.replace("babase.internal.show_app_invite", "_bauiv1.show_app_invite")
+content = content.replace("babase.internal.master_server_get", "babase.app.classic.master_server_v1_get")
+content = content.replace("babase.internal.master_server_post", "babase.app.classic.master_server_v1_post")
+content = content.replace("babase.internal.log_dumped_tracebacks", "babase._apputils.log_dumped_app_state")
+content = content.replace("babase.internal.have_outstanding_transactions", "bauiv1.app.plus.have_outstanding_v1_account_transactions")
+content = content.replace("babase.internal.get_public_login_id", "bauiv1.app.plus.get_v1_account_public_login_id")
+content = content.replace("babase.internal.get_input_map_hash", "bauiv1.app.classic.get_input_device_map_hash")
+content = content.replace("babase.internal.get_device_value", "bauiv1.app.classic.get_input_device_mapped_value")
+content = content.replace("babase.internal.", "bascenev1")
+# content = content.replace("babase.internal", "")
+
 content = content.replace("babase._generated", "babase._mgen")
 content = content.replace("_babase.disconnect_from_host", "bascenev1.disconnect_from_host")
 content = content.replace("babase.disconnect_from_host", "bascenev1.disconnect_from_host")
@@ -378,21 +398,12 @@ content = content.replace("babase.getcollidemesh", "bascenev1.getcollisionmesh")
 content = content.replace("collide_mesh", "collision_mesh")
 content = content.replace("babase.FloatSetting", "bascenev1.FloatSetting")
 content = content.replace("babase.playsound", "bascenev1.playsound")
+content = content.replace("bascenev1.time(timeformat=babase.TimeFormat.MILLISECONDS)", "bascenev1.time() * 1000")
 #!
 
 
 
 
-# Removed in API 8:
-# content = content.replace("babase.internal.set_telnet_access_enabled", "")
-
-content = content.replace("babase.internal.master_server_get", "babase.app.classic.master_server_v1_get")
-content = content.replace("babase.internal.master_server_post", "babase.app.classic.master_server_v1_post")
-content = content.replace("babase.internal.log_dumped_tracebacks", "babase._apputils.log_dumped_app_state")
-content = content.replace("babase.internal.have_outstanding_transactions", "bauiv1.app.plus.have_outstanding_v1_account_transactions")
-content = content.replace("babase.internal.get_public_login_id", "bauiv1.app.plus.get_v1_account_public_login_id")
-content = content.replace("babase.internal.get_input_map_hash", "bauiv1.app.classic.get_input_device_map_hash")
-content = content.replace("babase.internal.get_device_value", "bauiv1.app.classic.get_input_device_mapped_value")
 
 # Depracations
 content = content.replace("babase.app.build_number", "babase.app.build_number if build_number < 21282 else babase.app.env.build_number")
@@ -403,20 +414,19 @@ content = content.replace("babase.app.debug_build", "babase.app.debug_build if b
 content = content.replace("babase.app.test_build", "babase.app.test_build if build_number < 21282 else babase.app.env.test_build")
 content = content.replace("babase.app.data_directory", "babase.app.data_directory if build_number < 21282 else babase.app.env.data_directory")
 content = content.replace("babase.app.python_directory_user", "babase.app.python_directory_user if build_number < 21282 else babase.app.env.python_directory_user")
-content = content.replace("babase.app.python_directory_app", "babase.app.env")
+content = content.replace("babase.app.python_directory_app", "babase.app.python_directory_app if build_number < 21282 else babase.app.env.python_directory_app")
 content = content.replace("babase.app.python_directory_app_site", "babase.app.python_directory_app_site if build_number < 21282 else babase.app.env.python_directory_app_site")
 content = content.replace("babase.app.api_version", "babase.app.api_version if build_number < 21282 else babase.app.env.api_version")
 content = content.replace("babase.app.on_tv", "babase.app.on_tv if build_number < 21282 else babase.app.env.on_tv")
 content = content.replace("babase.app.vr_mode", "babase.app.vr_mode if build_number < 21282 else babase.app.env.vr")
 content = content.replace("babase.app.toolbar_test", "babase.app.toolbar_test if build_number < 21282 else babase.app.env.toolbar_test")
-content = content.replace("babase.app.arcade_mode", "babase.app.arcade_mode if build_number < 21282 else babase.app.env.arcade_mode")
+content = content.replace("babase.app.arcade_mode", "babase.app.arcade_mode if build_number < 21282 else babase.app.env.arcade")
 content = content.replace("babase.app.headless_mode", "babase.app.headless_mode if build_number < 21282 else babase.app.env.headless_mode")
 content = content.replace("babase.app.demo_mode", "babase.app.demo_mode if build_number < 21282 else babase.app.env.demo_mode")
 content = content.replace("babase.app.protocol_version", "babase.app.protocol_version if build_number < 21282 else babase.app.env.protocol_version")
-content = content.replace("bascenev1.get_connection_to_host_info", "bascenev1.get_connection_to_host_info if build_number < 21697 else bascenev1.get_connection_to_host_info_2")
+content = content.replace("bascenev1.get_connection_to_host_info", "bascenev1.get_connection_to_host_info if build_number < 21727 else bascenev1.get_connection_to_host_info_2")
 
 content = content.replace("babase._store", "bauiv1.app.classic.store")
-# content = content.replace("babase.internal", "")
 content = content.replace("bastd.ui", "bauiv1lib")
 content = content.replace("bastd", "bascenev1lib")
 content = content.replace("timetype=","")
