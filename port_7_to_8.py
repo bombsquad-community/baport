@@ -420,11 +420,11 @@ content = content.replace("babase.app.python_directory_app_site", "babase.app.py
 content = content.replace("babase.app.api_version", "babase.app.api_version if build_number < 21282 else babase.app.env.api_version")
 content = content.replace("babase.app.on_tv", "babase.app.on_tv if build_number < 21282 else babase.app.env.tv")
 content = content.replace("babase.app.vr_mode", "babase.app.vr_mode if build_number < 21282 else babase.app.env.vr")
-content = content.replace("babase.app.toolbar_test", "babase.app.toolbar_test if build_number < 21282 else babase.app.env.test")
+content = content.replace("babase.app.toolbar_test", "babase.app.toolbar_test if build_number < 21282 else _bauiv1.toolbar_test")
 content = content.replace("babase.app.arcade_mode", "babase.app.arcade_mode if build_number < 21282 else babase.app.env.arcade")
 content = content.replace("babase.app.headless_mode", "babase.app.headless_mode if build_number < 21282 else babase.app.env.headless")
 content = content.replace("babase.app.demo_mode", "babase.app.demo_mode if build_number < 21282 else babase.app.env.demo")
-content = content.replace("babase.app.protocol_version", "babase.app.protocol_version if build_number < 21282 else babase.app.env.version")
+content = content.replace("babase.app.protocol_version", "babase.app.protocol_version if build_number < 21282 else bascenev1.protocol_version")
 content = content.replace("bascenev1.get_connection_to_host_info", "bascenev1.get_connection_to_host_info if build_number < 21727 else bascenev1.get_connection_to_host_info_2")
 
 content = content.replace("babase._store", "bauiv1.app.classic.store")
