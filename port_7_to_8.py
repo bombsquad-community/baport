@@ -407,10 +407,10 @@ content = content.replace("bascenev1.time(timeformat=babase.TimeFormat.MILLISECO
 
 
 # Depracations
-content = content.replace("babase.app.build_number", "babase.app.build_number if build_number < 21282 else babase.app.env.build_number")
+content = content.replace("babase.app.build_number", "babase.app.build_number if build_number < 21282 else (babase.app.env.engine_build_number if build_number > 21823  else babase.app.env.build_number)")
 content = content.replace("babase.app.device_name", "babase.app.device_name if build_number < 21282 else babase.app.env.device_name")
 content = content.replace("babase.app.config_file_path", "babase.app.config_file_path if build_number < 21282 else babase.app.env.config_file_path")
-content = content.replace("babase.app.version", "babase.app.version if build_number < 21282 else babase.app.env.version")
+content = content.replace("babase.app.version", "babase.app.version if build_number < 21282 else (babase.app.env.engine_version if build_number > 21823  else babase.app.env.version)")
 content = content.replace("babase.app.debug_build", "babase.app.debug_build if build_number < 21282 else babase.app.env.debug")
 content = content.replace("babase.app.test_build", "babase.app.test_build if build_number < 21282 else babase.app.env.test")
 content = content.replace("babase.app.data_directory", "babase.app.data_directory if build_number < 21282 else babase.app.env.data_directory")
