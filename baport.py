@@ -3,17 +3,17 @@
 """Usage: port_7_to_8.py -f <plugin-name> -t <client/server type of mod>
 
 You'll have to manually update the following:
-
+From:
     with ba.Context(_ba.foreground_host_activity()):
-    To:
+To:
     with _ba.foreground_host_activity().context:
-
+From:
     ba.Timer((POWERUP_WEAR_OFF_TIME - 2000),ba.WeakCall(self._multi_bomb_wear_off_flash),timeformat=ba.TimeFormat.MILLISECONDS)
-    To:
+To:
     ba.Timer((POWERUP_WEAR_OFF_TIME - 2000 / 1000),ba.WeakCall(self._multi_bomb_wear_off_flash))
-
+From:
     ba.playsound(self._dingsound if importance == 1 else self._dingsoundhigh, volume=0.6)
-    To:
+To:
     self._dingsound.play(volume=0.6) if importance == 1 else self._dingsoundhigh.play(volume=0.6)
 """
 
@@ -401,32 +401,26 @@ def api6_to_api8(content :str, plugin_type :str) -> str:
     content = content.replace("babase.FloatSetting", "bascenev1.FloatSetting")
     content = content.replace("babase.playsound", "bascenev1.playsound")
     content = content.replace("bascenev1.time(timeformat=babase.TimeFormat.MILLISECONDS)", "bascenev1.time() * 1000")
-    #!
-
-
-
-
-
-    # Depracations
-    content = content.replace("babase.app.build_number", "babase.app.build_number if build_number < 21282 else (babase.app.env.engine_build_number if build_number > 21823  else babase.app.env.build_number)")
-    content = content.replace("babase.app.device_name", "babase.app.device_name if build_number < 21282 else babase.app.env.device_name")
-    content = content.replace("babase.app.config_file_path", "babase.app.config_file_path if build_number < 21282 else babase.app.env.config_file_path")
-    content = content.replace("babase.app.version", "babase.app.version if build_number < 21282 else (babase.app.env.engine_version if build_number > 21823  else babase.app.env.version)")
-    content = content.replace("babase.app.debug_build", "babase.app.debug_build if build_number < 21282 else babase.app.env.debug")
-    content = content.replace("babase.app.test_build", "babase.app.test_build if build_number < 21282 else babase.app.env.test")
-    content = content.replace("babase.app.data_directory", "babase.app.data_directory if build_number < 21282 else babase.app.env.data_directory")
-    content = content.replace("babase.app.python_directory_user", "babase.app.python_directory_user if build_number < 21282 else babase.app.env.python_directory_user")
-    content = content.replace("babase.app.python_directory_app", "babase.app.python_directory_app if build_number < 21282 else babase.app.env.python_directory_app")
-    content = content.replace("babase.app.python_directory_app_site", "babase.app.python_directory_app_site if build_number < 21282 else babase.app.env.python_directory_app_site")
-    content = content.replace("babase.app.api_version", "babase.app.api_version if build_number < 21282 else babase.app.env.api_version")
-    content = content.replace("babase.app.on_tv", "babase.app.on_tv if build_number < 21282 else babase.app.env.tv")
-    content = content.replace("babase.app.vr_mode", "babase.app.vr_mode if build_number < 21282 else babase.app.env.vr")
-    content = content.replace("babase.app.toolbar_test", "babase.app.toolbar_test if build_number < 21282 else _bauiv1.toolbar_test")
-    content = content.replace("babase.app.arcade_mode", "babase.app.arcade_mode if build_number < 21282 else babase.app.env.arcade")
-    content = content.replace("babase.app.headless_mode", "babase.app.headless_mode if build_number < 21282 else babase.app.env.headless")
-    content = content.replace("babase.app.demo_mode", "babase.app.demo_mode if build_number < 21282 else babase.app.env.demo")
-    content = content.replace("babase.app.protocol_version", "babase.app.protocol_version if build_number < 21282 else bascenev1.protocol_version")
-    content = content.replace("bascenev1.get_connection_to_host_info", "bascenev1.get_connection_to_host_info if build_number < 21727 else bascenev1.get_connection_to_host_info_2")
+    
+    content = content.replace("babase.app.build_number", "babase.app.env.engine_build_number")
+    content = content.replace("babase.app.device_name", "babase.app.env.device_name")
+    content = content.replace("babase.app.config_file_path", "babase.app.env.config_file_path")
+    content = content.replace("babase.app.version", "babase.app.env.engine_version")
+    content = content.replace("babase.app.debug_build", "babase.app.env.debug")
+    content = content.replace("babase.app.test_build", "babase.app.env.test")
+    content = content.replace("babase.app.data_directory", "babase.app.env.data_directory")
+    content = content.replace("babase.app.python_directory_user", "babase.app.env.python_directory_user")
+    content = content.replace("babase.app.python_directory_app", "babase.app.env.python_directory_app")
+    content = content.replace("babase.app.python_directory_app_site", "babase.app.env.python_directory_app_site")
+    content = content.replace("babase.app.api_version", "babase.app.env.api_version")
+    content = content.replace("babase.app.on_tv", "babase.app.env.tv")
+    content = content.replace("babase.app.vr_mode", "babase.app.env.vr")
+    content = content.replace("babase.app.toolbar_test", "_bauiv1.toolbar_test")
+    content = content.replace("babase.app.arcade_mode", "babase.app.env.arcade")
+    content = content.replace("babase.app.headless_mode", "babase.app.env.headless")
+    content = content.replace("babase.app.demo_mode", "babase.app.env.demo")
+    content = content.replace("babase.app.protocol_version", "bascenev1.protocol_version")
+    content = content.replace("bascenev1.get_connection_to_host_info", "bascenev1.get_connection_to_host_info_2")
 
     content = content.replace("babase._store", "bauiv1.app.classic.store")
     content = content.replace("bastd.ui", "bauiv1lib")
