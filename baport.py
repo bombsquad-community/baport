@@ -19,7 +19,7 @@ import re
 
 TRADEMARK = "# Porting made easier by baport.(https://github.com/bombsquad-community/baport)\n"
 
-def detect_encoding(file_path):
+def detect_file_encoding(file_path) -> str|None:
     encodings = ['utf-8', 'latin-1', 'ascii', 'cp1252']
     for encoding in encodings:
         try:
@@ -448,10 +448,23 @@ def api6_to_api8(content :str, plugin_type :str) -> str:
     content = content.replace("_bs", "bs")
 
     content = re.sub(r'bs\.Timer\(([^)]*)\bTimeType\.REAL\b([^)]*)\)', r'babase.AppTimer(\1\2)', content)
-    return content
     
+    return content
 
-def main():
+def api8_to_api9(content:str) -> str:
+    content = content.replace("# ba_meta require api 8", "# ba_meta require api 9")
+    content = content.replace("bs.get_connection_to_host_info", "get_connection_to_host_info_2")
+    # replace get_connection_to_host_info_2(args)["name"] with et_connection_to_host_info_2(args).name
+    content = re.sub(r"bs\.get_connection_to_host_info_2\((.*?)\)\\[\"name\"]", r"bs.get_connection_to_host_info_2(\1).name", content)
+    content = content.replace("bauiv1.Window", "bauiv1.MainWindow")
+    # To find and remove bauiv1.is_party_icon_visible(something) removed in api 9
+    content = re.sub(r'bauiv1\.is_party_icon_visible\([^\)]*\)', '', content)
+    content = content.replace("babase.env()[\"ui_scale\"]","babase.get_ui_scale()")
+    
+    return content
+
+
+def main() -> None:
     parser = argparse.ArgumentParser(
         description="Port plugins from api 6 to api 9",
         exit_on_error=False
@@ -481,11 +494,12 @@ def main():
         print(f"Error: The file '{file_path}' does not exist.")
         exit(1)
 
-    if encoding:=detect_encoding(file_path): # behold the walrus operator XDD
+    if encoding:=detect_file_encoding(file_path): # behold the walrus operator XDD
         with open(file_path, 'r', encoding=encoding) as read_f:
             print("Porting "+ file_path.name)
             file_text = read_f.read()
             file_text = api6_to_api8(file_text,plugin_type=plugin_type)
+            file_text = api8_to_api9(file_text)
             with open(file_path, 'w', encoding=encoding) as write_f:
                 write_f.write(TRADEMARK + file_text)
     else:
