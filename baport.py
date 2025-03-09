@@ -1,17 +1,21 @@
-# Usage: port_7_to_8.py -f <plugin-name> -t <client/server type of mod>
+#!/usr/bin/env python3
 
-# You'll have to manually update the following:
-# with ba.Context(_ba.foreground_host_activity()):
-# To:
-# with _ba.foreground_host_activity().context:
-#
-# ba.Timer((POWERUP_WEAR_OFF_TIME - 2000),ba.WeakCall(self._multi_bomb_wear_off_flash),timeformat=ba.TimeFormat.MILLISECONDS)
-# To:
-# ba.Timer((POWERUP_WEAR_OFF_TIME - 2000 / 1000),ba.WeakCall(self._multi_bomb_wear_off_flash))
-#
-# ba.playsound(self._dingsound if importance == 1 else self._dingsoundhigh, volume=0.6)
-# To:
-# self._dingsound.play(volume=0.6) if importance == 1 else self._dingsoundhigh.play(volume=0.6)
+"""Usage: port_7_to_8.py -f <plugin-name> -t <client/server type of mod>
+
+You'll have to manually update the following:
+
+    with ba.Context(_ba.foreground_host_activity()):
+    To:
+    with _ba.foreground_host_activity().context:
+
+    ba.Timer((POWERUP_WEAR_OFF_TIME - 2000),ba.WeakCall(self._multi_bomb_wear_off_flash),timeformat=ba.TimeFormat.MILLISECONDS)
+    To:
+    ba.Timer((POWERUP_WEAR_OFF_TIME - 2000 / 1000),ba.WeakCall(self._multi_bomb_wear_off_flash))
+
+    ba.playsound(self._dingsound if importance == 1 else self._dingsoundhigh, volume=0.6)
+    To:
+    self._dingsound.play(volume=0.6) if importance == 1 else self._dingsoundhigh.play(volume=0.6)
+"""
 
 import argparse
 from pathlib import Path
