@@ -331,6 +331,7 @@ content = content.replace("babase.internal.have_permission", "babase.have_permis
 content = content.replace("babase.internal.have_touchscreen_input", "bascenev1.have_touchscreen_input")
 content = content.replace("babase.internal.host_scan_cycle", "bascenev1.host_scan_cycle")
 content = content.replace("babase.internal.in_game_purchase", "bui.app.plus.in_game_purchase")
+content = content.replace("babase.UISubsystem","bauiv1.UIV1AppSubsystem")
 content = content.replace("babase.internal.increment_analytics_count", "babase.increment_analytics_count")
 content = content.replace("babase.internal.is_blessed", "bui.app.plus.is_blessed")
 content = content.replace("babase.internal.is_browser_likely_available", "bauiv1.is_browser_likely_available")
@@ -430,6 +431,8 @@ content = content.replace("babase.app.headless_mode", "babase.app.headless_mode 
 content = content.replace("babase.app.demo_mode", "babase.app.demo_mode if build_number < 21282 else babase.app.env.demo")
 content = content.replace("babase.app.protocol_version", "babase.app.protocol_version if build_number < 21282 else bascenev1.protocol_version")
 content = content.replace("bascenev1.get_connection_to_host_info", "bascenev1.get_connection_to_host_info if build_number < 21727 else bascenev1.get_connection_to_host_info_2")
+
+content = content.replace("bauiv1.UIV1AppSubsystem.set_main_menu_window", "bauiv1.UIV1AppSubsystem.set_main_window")
 
 content = content.replace("babase._store", "bauiv1.app.classic.store")
 content = content.replace("bastd.ui", "bauiv1lib")

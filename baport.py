@@ -330,6 +330,7 @@ def api6_to_api8(content :str, plugin_type :str) -> str:
     content = content.replace("babase.internal.in_game_purchase", "bui.app.plus.in_game_purchase")
     content = content.replace("babase.internal.increment_analytics_count", "babase.increment_analytics_count")
     content = content.replace("babase.internal.is_blessed", "bui.app.plus.is_blessed")
+    content = content.replace("babase.UISubsystem","bauiv1.UIV1AppSubsystem")
     content = content.replace("babase.internal.is_browser_likely_available", "bauiv1.is_browser_likely_available")
     content = content.replace("babase.internal.is_in_replay", "bascenev1.is_in_replay")
     content = content.replace("babase.internal.is_party_icon_visible", "bauiv1.is_party_icon_visible")
@@ -421,6 +422,8 @@ def api6_to_api8(content :str, plugin_type :str) -> str:
     content = content.replace("babase.app.demo_mode", "babase.app.env.demo")
     content = content.replace("babase.app.protocol_version", "bascenev1.protocol_version")
     content = content.replace("bascenev1.get_connection_to_host_info", "bascenev1.get_connection_to_host_info_2")
+
+    content = content.replace("bauiv1.UIV1AppSubsystem.set_main_menu_window", "bauiv1.UIV1AppSubsystem.set_main_window")
 
     content = content.replace("babase._store", "bauiv1.app.classic.store")
     content = content.replace("bastd.ui", "bauiv1lib")
