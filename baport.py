@@ -66,6 +66,8 @@ def api6_to_api8(content :str, plugin_type :str) -> str:
             content = content[:first_import_index] + 'from baenv import TARGET_BALLISTICA_BUILD as build_number\n' + content[first_import_index:]
             break
     content = content.replace("babase.app.ui", "bauiv1.app.ui_v1")
+    content = content.replace("bauiv1.app.ui_v1.set_main_menu_window", "bauiv1.app.ui_v1.set_main_window")
+
     content = content.replace("babase.app.accounts_v1", "bauiv1.app.classic.accounts")
 
     ###################################################################################
@@ -422,8 +424,6 @@ def api6_to_api8(content :str, plugin_type :str) -> str:
     content = content.replace("babase.app.demo_mode", "babase.app.env.demo")
     content = content.replace("babase.app.protocol_version", "bascenev1.protocol_version")
     content = content.replace("bascenev1.get_connection_to_host_info", "bascenev1.get_connection_to_host_info_2")
-
-    content = content.replace("bauiv1.UIV1AppSubsystem.set_main_menu_window", "bauiv1.UIV1AppSubsystem.set_main_window")
 
     content = content.replace("babase._store", "bauiv1.app.classic.store")
     content = content.replace("bastd.ui", "bauiv1lib")
