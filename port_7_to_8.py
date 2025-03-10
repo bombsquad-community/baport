@@ -1,17 +1,21 @@
-# Usage: port_7_to_8.py <client/server type of mod> <plugin-name>
+#!/usr/bin/env python3
 
-# You'll have to manually update the following:
-# with ba.Context(_ba.foreground_host_activity()):
-# To:
-# with _ba.foreground_host_activity().context:
-#
-# ba.Timer((POWERUP_WEAR_OFF_TIME - 2000),ba.WeakCall(self._multi_bomb_wear_off_flash),timeformat=ba.TimeFormat.MILLISECONDS)
-# To:
-# ba.Timer((POWERUP_WEAR_OFF_TIME - 2000 / 1000),ba.WeakCall(self._multi_bomb_wear_off_flash))
-#
-# ba.playsound(self._dingsound if importance == 1 else self._dingsoundhigh, volume=0.6)
-# To:
-# self._dingsound.play(volume=0.6) if importance == 1 else self._dingsoundhigh.play(volume=0.6)
+"""Usage: port_7_to_8.py <client/server type of mod> <plugin-name>
+
+You'll have to manually update the following:
+From:
+    with ba.Context(_ba.foreground_host_activity()):
+To:
+    with _ba.foreground_host_activity().context:
+From:
+    ba.Timer((POWERUP_WEAR_OFF_TIME - 2000),ba.WeakCall(self._multi_bomb_wear_off_flash),timeformat=ba.TimeFormat.MILLISECONDS)
+To:
+    ba.Timer((POWERUP_WEAR_OFF_TIME - 2000 / 1000),ba.WeakCall(self._multi_bomb_wear_off_flash))
+From:
+    ba.playsound(self._dingsound if importance == 1 else self._dingsoundhigh, volume=0.6)
+To:
+    self._dingsound.play(volume=0.6) if importance == 1 else self._dingsoundhigh.play(volume=0.6)
+"""
 
 import re
 import sys
@@ -65,6 +69,8 @@ for word in affected_methods:
         content = content[:first_import_index] + 'from baenv import TARGET_BALLISTICA_BUILD as build_number\n' + content[first_import_index:]
         break
 content = content.replace("babase.app.ui", "bauiv1.app.ui_v1")
+content = content.replace("bauiv1.app.ui_v1.set_main_menu_window", "bauiv1.app.ui_v1.set_main_window")
+
 content = content.replace("babase.app.accounts_v1", "bauiv1.app.classic.accounts")
 
 ###################################################################################
@@ -327,6 +333,7 @@ content = content.replace("babase.internal.have_permission", "babase.have_permis
 content = content.replace("babase.internal.have_touchscreen_input", "bascenev1.have_touchscreen_input")
 content = content.replace("babase.internal.host_scan_cycle", "bascenev1.host_scan_cycle")
 content = content.replace("babase.internal.in_game_purchase", "bui.app.plus.in_game_purchase")
+content = content.replace("babase.UISubsystem","bauiv1.UIV1AppSubsystem")
 content = content.replace("babase.internal.increment_analytics_count", "babase.increment_analytics_count")
 content = content.replace("babase.internal.is_blessed", "bui.app.plus.is_blessed")
 content = content.replace("babase.internal.is_browser_likely_available", "bauiv1.is_browser_likely_available")
