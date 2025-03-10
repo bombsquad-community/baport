@@ -15,9 +15,13 @@ From:
     ba.playsound(self._dingsound if importance == 1 else self._dingsoundhigh, volume=0.6)
 To:
     self._dingsound.play(volume=0.6) if importance == 1 else self._dingsoundhigh.play(volume=0.6)
+From:
+    bui.app.ui_v1.use_toolbars
+To:
+    Either True or False, whatever works for you 
 """
 
-import argparse
+import argparse``
 from pathlib import Path
 import re
 
