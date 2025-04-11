@@ -13,3 +13,5 @@ For server side plugins/minigages:
 ```
 $ python ./port_7_to_8.py server some_plugin.py
 ```
+
+Note: The script now supports Apy 9.
