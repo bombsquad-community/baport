@@ -13,3 +13,5 @@ For server side plugins/minigages:
 ```
 $ python baport.py -t server -f some_plugin.py
 ```
+
+Note: The script now supports Apy 9.
