@@ -1,6 +1,6 @@
 # baport
 
-Port Bombsquad plugins from API 6 and 7 to API 8 or API 9. (If you are having any issue with api 6 raise an issue or contact me on discord `brostos`)
+Port Bombsquad plugins from API 6 and 7 to API 8 or API 9.
 
 ## Usage
 
