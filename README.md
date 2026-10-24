@@ -52,17 +52,11 @@ $ python baport.py --app-timers -f party_window_plugin.py
 
 Minigames and maps are left alone even with this flag. A repeating `bs.timer(..., repeat=True)` can't be converted automatically (`babase.apptimer` can't repeat), so baport points those out for you to change by hand.
 
+### Private api
+
+Plugins sometimes use private parts of the game (`_babase`, `babase._apputils`, ...). These change without a changelog entry, so baport keeps a list of when private names moved or were removed. This is on by default, `--no-private` turns it off.
+
 ### Other options
 
 - `-n`/`--dry-run` prints a diff instead of writing the file.
 - After porting, baport lists things it couldn't convert automatically, with line numbers.
-
-## Checking ported plugins
-
-`check_plugins.py` loads plugins in a real BombSquad install (the flatpak by default) with a throwaway config and mods folder, and reports import errors, names that don't exist, and deprecated APIs:
-
-```
-$ python check_plugins.py some_plugin.py other_plugin.py
-```
-
-A game window opens for a few seconds while it runs. Use `--game-cmd` to point it at a different BombSquad install.
