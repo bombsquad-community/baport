@@ -50,7 +50,7 @@ Game timers (`bs.Timer`, `bs.timer`) only work while a game is running. If your 
 $ python baport.py --app-timers -f party_window_plugin.py
 ```
 
-Minigames and maps are left alone even with this flag. A repeating `bs.timer(..., repeat=True)` can't be converted automatically (`babase.apptimer` can't repeat), so baport points those out for you to change by hand.
+Minigames and maps are left alone even with this flag, and so are timers inside classes deriving from a game, activity, session, map, actor or bot (e.g. a plugin that adds a minigame or a bot class). Functions patched onto such classes from outside still count as non-game code. A repeating `bs.timer(..., repeat=True)` can't be converted automatically (`babase.apptimer` can't repeat), so baport points those out for you to change by hand.
 
 ### Private api
 

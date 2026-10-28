@@ -28,6 +28,7 @@ To:
 
 import argparse
 import ast
+from bisect import bisect_right
 import difflib
 from pathlib import Path
 import re
@@ -85,7 +86,11 @@ def add_import(content: str, statement: str) -> str:
     try:
         body = ast.parse(content).body
     except SyntaxError:
-        body = []
+        # the api 7 port can leave hints that don't parse, so find the imports as text
+        future = [m.end() for m in re.finditer(r'^from[ \t]+__future__[ \t]+import[^\n]*\n?', content, flags=re.MULTILINE)]
+        first = re.search(r'^(?:import|from)[ \t]+(?!__future__\b)\w', content, flags=re.MULTILINE)
+        index = first.start() if first else 0
+        return insert_at(content, max([index] + future[-1:]), statement)
     imports = [
         n
         for n in body
@@ -100,8 +105,13 @@ def add_import(content: str, statement: str) -> str:
             is_docstring = node is body[0] and isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant)
             if is_docstring or (isinstance(node, ast.ImportFrom) and node.module == "__future__"):
                 line = node.end_lineno + 1
-    lines = content.splitlines(keepends=True)
-    index = sum(len(l) for l in lines[: line - 1])
+    # ast counts lines by \n only, unlike str.splitlines()
+    index = sum(len(l) + 1 for l in content.split("\n")[: line - 1])
+    return insert_at(content, min(index, len(content)), statement)
+
+
+def insert_at(content: str, index: int, statement: str) -> str:
+    """Inserts the statement line at index, the start of a line (or the end of content)."""
     if index and not content[:index].endswith("\n"):
         statement = "\n" + statement
     return content[:index] + statement + "\n" + content[index:]
@@ -114,33 +124,150 @@ def ensure_import(content: str, module: str) -> str:
     return add_import(content, f"import {module}")
 
 
+class FromImport(NamedTuple):
+    """A `from module import ...` statement, as from_imports() finds it."""
+
+    # offsets of its first character (the indent) and of the end of its last line
+    start: int
+    end: int
+    indent: str
+    module: str
+    # ("name" or "name as alias", the comment after it on its line or "")
+    entries: list[tuple[str, str]]
+    parens: bool
+    # comments that belong to the whole statement
+    comments: list[str]
+
+
+def split_comment(line: str) -> tuple[str, str]:
+    """Splits an import line into its code and its `# comment` (imports hold no strings)."""
+    code, hash_, comment = line.partition("#")
+    return code, (hash_ + comment).rstrip()
+
+
+def from_imports(content: str, module: str | None = None) -> list[FromImport]:
+    """The `from module import ...` statements in content (all modules when module is None).
+
+    Handles parenthesized imports over several lines, backslash continuations,
+    `as` aliases and comments. Statements with anything else on their line
+    (`; x = 1`) are skipped.
+    """
+    found = []
+    for match in re.finditer(r'^([ \t]*)from[ \t]+([\w.]+)[ \t]+import[ \t]*', content, flags=re.MULTILINE):
+        if module is not None and match.group(2) != module:
+            continue
+        pos = match.end()
+        entries, comments = [], []
+        if content.startswith("(", pos):
+            # the closing paren, skipping comments that may hold one
+            i = pos + 1
+            while i < len(content) and content[i] != ")":
+                i = content.find("\n", i) if content[i] == "#" else i + 1
+                if i < 0:
+                    i = len(content)
+            if i >= len(content):
+                continue
+            for line in content[pos + 1 : i].split("\n"):
+                code, comment = split_comment(line)
+                names = [n.strip() for n in code.split(",") if n.strip()]
+                entries += [(n, "") for n in names]
+                if comment and names:
+                    entries[-1] = (entries[-1][0], comment)
+                elif comment:
+                    comments.append(comment)
+            end = content.find("\n", i)
+            end = len(content) if end < 0 else end
+            code, comment = split_comment(content[i + 1 : end])
+            parens = True
+        else:
+            code, end = "", pos
+            while True:
+                line_end = content.find("\n", end)
+                line_end = len(content) if line_end < 0 else line_end
+                part, comment = split_comment(content[end:line_end])
+                if not comment and part.rstrip().endswith("\\") and line_end < len(content):
+                    code += part.rstrip()[:-1] + " "
+                    end = line_end + 1
+                    continue
+                code += part
+                end = line_end
+                break
+            entries = [(n.strip(), "") for n in code.split(",") if n.strip()]
+            code = ""
+            parens = False
+        if code.strip() or not entries or any(not re.fullmatch(r'\w+(\s+as\s+\w+)?', e) for e, _ in entries):
+            continue
+        if comment:
+            comments.append(comment)
+        found.append(FromImport(match.start(), end, match.group(1), match.group(2), entries, parens, comments))
+    return found
+
+
+def entry_name(entry: tuple[str, str]) -> str:
+    """The imported name of a FromImport entry."""
+    return entry[0].split()[0]
+
+
+def entry_local(entry: tuple[str, str]) -> str:
+    """The name a FromImport entry binds (its alias, if any)."""
+    return entry[0].split()[-1]
+
+
+def import_text(imp: FromImport, entries: list[tuple[str, str]], module: str | None = None) -> str:
+    """The statement imp with entries instead of its own (and module instead of its own)."""
+    head = f"{imp.indent}from {module or imp.module} import "
+    comment = "".join("  " + c for c in imp.comments)
+    if not imp.parens and not any(c for _, c in entries):
+        return head + ", ".join(e for e, _ in entries) + comment
+    lines = [head + "(" + comment]
+    lines += [f"{imp.indent}    {e},{'  ' + c if c else ''}" for e, c in entries]
+    return "\n".join(lines + [imp.indent + ")"])
+
+
+def replace_import(content: str, imp: FromImport, entries: list[tuple[str, str]]) -> str:
+    """Rewrites imp to import only entries, dropping it when none are left."""
+    if entries:
+        return content[: imp.start] + import_text(imp, entries) + content[imp.end :]
+    if imp.indent:
+        # an emptied import inside a block still needs a statement there
+        return content[: imp.start] + imp.indent + "pass" + content[imp.end :]
+    return content[: imp.start] + content[imp.end + 1 if content.startswith("\n", imp.end) else imp.end :]
+
+
+def imported_as(content: str, module: str, name: str) -> set[str]:
+    """The local names `from module import name [as alias]` statements bind."""
+    return {entry_local(e) for imp in from_imports(content, module) for e in imp.entries if entry_name(e) == name}
+
+
 def drop_import_name(content: str, module: str, name: str) -> str:
     """Removes name from `from module import ...` statements, dropping ones left empty."""
+    for imp in reversed(from_imports(content, module)):
+        kept = [e for e in imp.entries if entry_name(e) != name]
+        if len(kept) != len(imp.entries):
+            content = replace_import(content, imp, kept)
+    return content
 
-    def fix(match: re.Match) -> str:
-        names = [n.strip() for n in match.group(2).strip("()").split(",")]
-        kept = [n for n in names if n and n != name]
-        if len(kept) == len([n for n in names if n]):
-            return match.group(0)
-        indent = match.group(1)[: len(match.group(1)) - len(match.group(1).lstrip())]
-        if not kept:
-            # an emptied import inside a block still needs a statement there
-            return f"{indent}pass{match.group(3)}" if indent else ""
-        if match.group(2).startswith("("):
-            return (
-                f"{match.group(1)}(\n{indent}    "
-                + f",\n{indent}    ".join(kept)
-                + f",\n{indent})"
-                + match.group(3)
-            )
-        return match.group(1) + ", ".join(kept) + match.group(3)
 
-    return re.sub(
-        rf'^([ \t]*from {re.escape(module)} import )(\([^)]*\)|[\w ,]+$)(\n?)',
-        fix,
-        content,
-        flags=re.MULTILINE,
-    )
+def replace_calls(
+    content: str, pattern: str, make: Callable[[re.Match, list[str] | None], str | None]
+) -> str:
+    """Rewrites each call whose start, up to and including its `(`, matches pattern.
+
+    make(match, args) returns the text for the whole call, or None to leave it.
+    args is None when the call's parens don't balance, and then the text only
+    replaces the match.
+    """
+    out, pos = [], 0
+    for match in re.finditer(pattern, content):
+        if match.start() < pos:
+            continue
+        parsed = call_args(content, match.end())
+        text = make(match, parsed[1] if parsed else None)
+        if text is None:
+            continue
+        out += [content[pos : match.start()], text]
+        pos = parsed[0] if parsed else match.end()
+    return "".join(out) + content[pos:]
 
 
 def drop_removed_function(content: str, module: str, name: str) -> str:
@@ -151,12 +278,12 @@ def drop_removed_function(content: str, module: str, name: str) -> str:
     """
     # through any ba module name, also ones the api 7 port leaves unimported (_bui.x)
     forms = [rf'(?<![\w.])(?:_?ba\w*|_?bui|_?bs|{"|".join(map(re.escape, ba_aliases(content))) or "_?ba"})\.{name}\b']
-    if re.search(rf'^\s*from _?{re.escape(module)} import .*\b{name}\b', content, flags=re.MULTILINE):
-        for m in (module, "_" + module):
-            content = drop_import_name(content, m, name)
-        forms.append(rf'(?<![\w.])(?<!def ){name}\b')
+    local = imported_as(content, module, name) | imported_as(content, "_" + module, name)
+    for m in (module, "_" + module):
+        content = drop_import_name(content, m, name)
+    forms += [rf'(?<![\w.])(?<!def ){re.escape(n)}\b' for n in sorted(local)]
     for form in forms:
-        content = re.sub(rf'{form}\([^)]*\)', "None", content)
+        content = replace_calls(content, rf'{form}\s*\(', lambda _, args: "None" if args is not None else None)
         # assigning to it only adds an attribute, so leave that alone
         content = re.sub(rf'{form}(?!\s*=[^=])', "(lambda *args, **kwargs: None)", content)
     return content
@@ -171,6 +298,131 @@ def module_alias(content: str, *modules: str) -> tuple[str, str]:
         if imported in modules:
             return content, alias
     return ensure_import(content, modules[0]), modules[0]
+
+
+# Public names of bascenev1 and bauiv1 that babase doesn't have (their __all__ in 1.8.5)
+SCENE_ONLY_NAMES = frozenset(
+    """
+    Activity ActivityData Actor ActorHost BaseTime BaseTimer BoolSetting Campaign
+    CelebrateMessage CharacterHandle CharacterParts ChoiceSetting Chooser
+    ClassicControlsLocalDisplayConfig Collision CollisionMesh CollisionMeshHandle
+    CoopGameActivity CoopSession DEFAULT_TEAM_COLORS DEFAULT_TEAM_NAMES Data DeathType
+    Depiction DieMessage DropMessage DroppedMessage DualTeamSession EmptyPlayer EmptyTeam
+    FeedbackEvent FloatChoiceSetting FloatSetting FreeForAllSession FreezeMessage
+    GameActivity GameResults GameTip HealthBarDisplay HitMessage HostInfo HostProbeOutcome
+    HostRequirements ImpactDamageMessage InputDevice IntChoiceSetting IntSetting
+    JoinActivity JoinInfo Level Lobby LocalDisplay LocalDisplayConfig LocalDisplayConfigSet
+    LocalDisplayHandler LocalDisplayTypeID Map Material Mesh MultiTeamSession MusicType Node
+    NodeActor OutOfBoundsMessage PickUpMessage PickedUpMessage Player PlayerDiedMessage
+    PlayerInfo PlayerProfilesChangedMessage PlayerRecord PlayerScoredMessage
+    PowerupAcceptMessage PowerupMessage Quat SceneV1AppSubsystem SceneV1AssetSet SceneViewer
+    ScoreConfig ScoreScreenActivity ScoreType Session SessionData SessionPlayer SessionTeam
+    Setting ShouldShatterMessage Sound SoundHandle SpazDef StandLocation StandMessage Stats
+    Team TeamGameActivity Texture ThawMessage Time Timer UNHANDLED UnknownLocalDisplayConfig
+    WinnerGroup animate animate_array apcollisionmeshget apmeshget apsoundget aptextureget
+    basetime basetimer broadcastmessage cameraflash camerashake
+    capture_game_controller_input capture_keyboard_input chatmessage
+    client_info_query_response connect_to_party disconnect_client disconnect_from_host
+    emitfx end_host_scanning fetch_host_requirements filter_playlist get_chat_messages
+    get_client_ping get_connection_to_host_info get_connection_to_host_info_2
+    get_default_free_for_all_playlist get_default_powerup_distribution
+    get_default_teams_playlist get_filtered_map_name get_foreground_host_activity
+    get_foreground_host_session get_game_port get_game_roster get_input_devices
+    get_joined_host_asset_packages get_local_active_input_devices_count
+    get_main_ui_input_device get_map_class get_map_display_string get_player_colors
+    get_player_profile_colors get_player_profile_icon get_public_party_enabled
+    get_public_party_max_size get_random_names get_replay_asset_packages
+    get_replay_speed_exponent get_trophy_string getactivity getcollision getcollisionmesh
+    getdata getinputdevice getlocaldisplay getmesh getnodes getsession getsound gettexture
+    have_connected_clients have_touchscreen_input host_scan_cycle host_ui_send_to_client
+    host_ui_send_to_host init_campaigns is_in_replay is_replay_paused launch_replay
+    ls_input_devices ls_objects name_text new_host_session new_replay_session newactivity
+    newnode pause_replay plain_name_json prepare_replay print_live_object_warnings
+    printnodes protocol_version register_local_display_handler register_map
+    release_game_controller_input release_keyboard_input reset_random_player_names
+    resolve_asset_packages_with_dialog resume_replay seek_replay set_admins
+    set_authenticate_clients set_debug_speed_exponent set_enable_default_kick_voting
+    set_host_password set_hosting_asset_packages set_internal_music set_map_bounds
+    set_master_server_source set_max_players_override set_player_rejoin_cooldown
+    set_public_party_enabled set_public_party_max_size set_public_party_name
+    set_public_party_public_address_ipv4 set_public_party_public_address_ipv6
+    set_public_party_queue_enabled set_public_party_stats_url set_replay_speed_exponent
+    set_scene_asset_set set_touchscreen_editing setmusic show_damage_count split_character
+    texture_from_ref texture_spec_from_ref time timer
+    """.split()
+)
+UI_ONLY_NAMES = frozenset(
+    """
+    BasicMainWindowState CharacterHandle Keyboard MainWindow MainWindowAutoRecreateSuppress
+    MainWindowState Mesh MeshViewer RootUIUpdatePause Sound SoundHandle Texture UIAssetSet
+    UIOpenState UIV1AppSubsystem Viewer ViewerRegistry ViewerSource Widget Window apmeshget
+    apsoundget aptextureget buttonwidget checkboxwidget columnwidget containerwidget
+    flash_party_icon get_depiction_control get_qrcode_texture get_selected_widget
+    get_special_widget getmesh getsound gettexture hscrollwidget imagewidget mesh_from_ref
+    play_swish root_ui_pause_updates root_ui_resume_updates rowwidget scrollwidget
+    set_party_notice set_ui_asset_set sliderwidget snap_slider_value sound_from_ref
+    spinnerwidget texture_from_ref textwidget uibounds uicleanupcheck widget widget_by_id
+    """.split()
+)
+
+
+def fix_misplaced_names(content: str, plugin_type: str | None) -> str:
+    """Fixes names earlier ports left in the wrong module.
+
+    Earlier api 7 to 8 ports turned every ba.X into babase.X, so babase.X moves
+    to bascenev1/bauiv1 for names babase never had. Names in both modules
+    (Texture, gettexture, ...) follow the plugin type like the api 7 port does
+    (client: bauiv1), or without one whichever of them the plugin imports.
+    Some also picked the wrong one of the two: bs.Widget is bui.Widget, and
+    bui.X for a bascenev1-only name is bs.X. The party window is
+    app.classic.party_window, not app.ui_v1's.
+    """
+    content = re.sub(r'\.app\.ui_v1\.party_window\b', ".app.classic.party_window", content)
+    aliases = ba_aliases(content)
+
+    def imports(module: str) -> bool:
+        return module in aliases.values() or bool(
+            re.search(rf'^\s*from {module} import', content, flags=re.MULTILINE)
+        )
+
+    if plugin_type:
+        shared = "bauiv1" if plugin_type == "client" else "bascenev1"
+    else:
+        shared = "bauiv1" if imports("bauiv1") and not imports("bascenev1") else "bascenev1"
+
+    def home(source: str, name: str) -> str | None:
+        """The module name belongs in, when it isn't source's."""
+        scene, ui = name in SCENE_ONLY_NAMES, name in UI_ONLY_NAMES
+        if source == "babase":
+            return shared if scene and ui else "bascenev1" if scene else "bauiv1" if ui else None
+        if source == "bascenev1":
+            return "bauiv1" if ui and not scene else None
+        return "bascenev1" if scene and not ui else None
+
+    for source in ("babase", "bascenev1", "bauiv1"):
+        for name in sorted({entry_name(e) for imp in from_imports(content, source) for e in imp.entries}):
+            if module := home(source, name):
+                content = move_from_imports(content, source, module, name)
+        # unimported babase.X too, it survives in annotations
+        names = "|".join(filter(None, [module_aliases(content, source), "babase" if source == "babase" else ""]))
+        if not names:
+            continue
+        pattern = rf'(?<![\w.])(?:{names})\.(\w+)\b'
+        targets = {}
+        for module in sorted({home(source, m.group(1)) for m in re.finditer(pattern, content)} - {None}):
+            content, targets[module] = module_alias(content, module)
+
+        def fix(match: re.Match) -> str:
+            module = home(source, match.group(1))
+            if not module:
+                return match.group(0)
+            # ba_meta lines need the full module name, not an alias
+            line = content[content.rfind("\n", 0, match.start()) + 1 : match.start()]
+            prefix = module if re.match(r'\s*#\s*ba_meta\b', line) else targets[module]
+            return f"{prefix}.{match.group(1)}"
+
+        content = re.sub(pattern, fix, content)
+    return content
 
 
 class Change(NamedTuple):
@@ -324,9 +576,6 @@ class Api8:
             r'\bimport ba(\b|\.(\w+))', "import babase\nimport bauiv1\nimport bascenev1", content
         )
         content = content.replace("babase.app.ui", "bauiv1.app.ui_v1")
-        content = content.replace(
-            "bauiv1.app.ui_v1.set_main_menu_window", "bauiv1.app.ui_v1.set_main_window"
-        )
 
         content = content.replace("babase.app.accounts_v1", "bauiv1.app.classic.accounts")
 
@@ -416,8 +665,7 @@ class Api8:
         content = content.replace("babase.PickedUpMessage", "bascenev1.PickedUpMessage")
         content = content.replace("babase.PowerupMessage", "bascenev1.PowerupMessage")
         content = content.replace("babase.FreezeMessage", "bascenev1.FreezeMessage")
-        content = content.replace("with babase.ContextRef(activity):", "with activity.context:")
-        content = content.replace("babase.Context", "babase.ContextRef")
+        content = context_refs(content)
         content = content.replace("babase._dualteamsession", "bascenev1._dualteamsession")
         content = content.replace("babase._freeforallsession", "bascenev1._freeforallsession")
         content = content.replace("babase._multiteamsession", "bascenev1._multiteamsession")
@@ -979,6 +1227,11 @@ class Api8:
 
         return content
 
+    @change("1.7.20", needs_type=True)
+    def v1_7_20_misplaced(content: str, plugin_type: str | None) -> str:
+        """babase.Setting etc. to bascenev1/bauiv1, bs.Widget etc. to bauiv1, app.ui_v1.party_window to app.classic."""
+        return fix_misplaced_names(content, plugin_type)
+
     @change("1.7.21")
     def v1_7_21(content: str) -> str:
         """PotentialPlugin is PluginSpec, app.plugins.potential_plugins is plugin_specs."""
@@ -1178,21 +1431,30 @@ class Api9:
     def v1_7_37(content: str) -> str:
         """efro.log, tpartial, enum_by_value, party icon, ui_scale, UIV1Subsystem, threadpool changes."""
         content = re.sub(r'\befro\.log\b', "efro.logging", content)
-        if re.search(r'^\s*from efro\.call import .*\btpartial\b', content, flags=re.MULTILINE):
+        for local in sorted(imported_as(content, "efro.call", "tpartial")):
             content = drop_import_name(content, "efro.call", "tpartial")
-            content = add_import(content, "from functools import partial as tpartial")
+            content = add_import(content, f"from functools import partial as {local}")
         if "efro.call.tpartial" in content:
             content = content.replace("efro.call.tpartial", "functools.partial")
             content = ensure_import(content, "functools")
         # enum_by_value(MyEnum, foo) is just MyEnum(foo)
+        local = imported_as(content, "efro.util", "enum_by_value")
         content = drop_import_name(content, "efro.util", "enum_by_value")
-        content = re.sub(r'\b(?:[\w.]+\.)?enum_by_value\(\s*([\w.]+)\s*,\s*', r'\1(', content)
+        names = "|".join([r'\b(?:[\w.]+\.)?enum_by_value'] + [rf'(?<![\w.]){re.escape(n)}' for n in sorted(local)])
+        content = re.sub(rf'(?:{names})\(\s*([\w.]+)\s*,\s*', r'\1(', content)
         # the party icon is always visible now
-        content = re.sub(r'\b\w+\.is_party_icon_visible\([^)]*\)', "True", content)
+        content = replace_calls(
+            content, r'\b\w+\.is_party_icon_visible\(', lambda _, args: "True" if args is not None else None
+        )
         content = drop_removed_function(content, "bauiv1", "set_party_icon_always_visible")
         content = re.sub(r'\b(\w+)\.env\(\)\[["\']ui_scale["\']\]', r'\1.get_ui_scale()', content)
         content = re.sub(r'\bUIV1Subsystem\b', "UIV1AppSubsystem", content)
         return re.sub(r'\.threadpool_submit_no_wait\(', ".threadpool.submit_no_wait(", content)
+
+    @change("1.7.37", needs_type=True)
+    def v1_7_37_misplaced(content: str, plugin_type: str | None) -> str:
+        """The 1.7.20 misplaced names fix again, for plugins already claiming api 9."""
+        return fix_misplaced_names(content, plugin_type)
 
     @change(
         "1.7.37",
@@ -1252,23 +1514,17 @@ class Api9:
         aliases = "|".join(re.escape(a) for a in ba_aliases(content)) or "babase"
         # `from babase._error import print_exception` also allows bare calls, but only
         # for the names imported (a plugin may define its own print_error)
-        imported = set()
-        for module, names in re.findall(
-            r'^\s*from (_?ba[\w.]*) import (.*)$', content, flags=re.MULTILINE
-        ):
-            for kind in ("exception", "error"):
-                if re.search(rf'\bprint_{kind}\b', names):
-                    imported.add(kind)
-                    content = drop_import_name(content, module, f"print_{kind}")
+        modules = {imp.module for imp in from_imports(content) if re.fullmatch(r'_?ba[\w.]*', imp.module)}
         used = False
         for kind in ("exception", "error"):
-            prefix = rf'\b(?:{aliases})\.'
-            if kind in imported:
-                prefix = rf'(?:{prefix}|(?<![\w.])(?<!def ))'
-            if re.search(rf'{prefix}print_{kind}\(', content):
-                if kind == "exception":
-                    content = re.sub(rf'{prefix}print_exception\(\)', "logging.exception('Error')", content)
-                content = re.sub(rf'{prefix}print_{kind}\(', f"logging.{kind}(", content)
+            local = set().union(*(imported_as(content, m, f"print_{kind}") for m in modules))
+            for module in modules:
+                content = drop_import_name(content, module, f"print_{kind}")
+            pattern = rf'\b(?:{aliases})\.print_{kind}'
+            if local:
+                pattern = rf'(?:{pattern}|(?<![\w.])(?<!def )(?:{"|".join(map(re.escape, sorted(local)))}))'
+            if re.search(rf'{pattern}\(', content):
+                content = print_to_logging(content, rf'{pattern}\(', kind)
                 used = True
         if used:
             content = ensure_import(content, "logging")
@@ -1292,20 +1548,21 @@ class Api9:
     @change("1.7.40")
     def v1_7_40(content: str) -> str:
         """bascenev1lib.actor.playerspaz no longer has PlayerT (PEP 695 generics)."""
-        if re.search(
-            r'^from bascenev1lib\.actor\.playerspaz import .*\bPlayerT\b',
-            content,
-            flags=re.MULTILINE,
-        ):
-            content = drop_import_name(content, "bascenev1lib.actor.playerspaz", "PlayerT")
-            content = ensure_import(content, "typing")
-            content = re.sub(
-                r'^(from bascenev1lib\.actor\.playerspaz import .*)$',
-                r"\1\nPlayerT = typing.TypeVar('PlayerT')",
-                content,
-                count=1,
-                flags=re.MULTILINE,
-            )
+        module = "bascenev1lib.actor.playerspaz"
+        imports = [imp for imp in from_imports(content, module) if any(entry_name(e) == "PlayerT" for e in imp.entries)]
+        if not imports:
+            return content
+        for imp in reversed(imports):
+            # a TypeVar in its place, in the same block (often `if TYPE_CHECKING:`)
+            kept = [e for e in imp.entries if entry_name(e) != "PlayerT"]
+            lines = [import_text(imp, kept)] if kept else []
+            lines += [
+                f"{imp.indent}{entry_local(e)} = typing.TypeVar('PlayerT')"
+                for e in imp.entries
+                if entry_name(e) == "PlayerT"
+            ]
+            content = content[: imp.start] + "\n".join(lines) + content[imp.end :]
+        content = ensure_import(content, "typing")
         return content
 
     @change(
@@ -1538,8 +1795,10 @@ class Api9:
             r'\1.value',
             content,
         )
-        if not re.search(r'\bcharstr\(', content):
-            for module in ("babase", "bauiv1", "bascenev1"):
+        # drop the import once nothing calls it by the name it binds
+        for module in ("babase", "bauiv1", "bascenev1"):
+            local = imported_as(content, module, "charstr")
+            if local and not any(re.search(rf'(?<![\w.]){re.escape(n)}\(', content) for n in local):
                 content = drop_import_name(content, module, "charstr")
         content = re.sub(r'\bon_return_press_call\s*=', "on_submit_call=", content)
         return re.sub(r'\binvoke_return_press\s*=', "invoke_submit=", content)
@@ -1685,23 +1944,18 @@ def reference(content: str, dotted: str) -> tuple[str, str]:
 
 def move_from_imports(content: str, old_module: str, new_module: str, name: str) -> str:
     """Moves name out of `from old_module import ...` into its own `from new_module import`."""
-
-    def fix(match: re.Match) -> str:
-        entries = [e.strip() for e in match.group(2).split("#")[0].strip("()").split(",")]
-        moving = [e for e in entries if e and e.split()[0] == name]
+    for imp in reversed(from_imports(content, old_module)):
+        moving = [e for e in imp.entries if entry_name(e) == name]
         if not moving:
-            return match.group(0)
-        kept = [e for e in entries if e and e not in moving]
-        lines = [f"{match.group(1)}from {old_module} import {', '.join(kept)}"] if kept else []
-        lines.append(f"{match.group(1)}from {new_module} import {', '.join(moving)}")
-        return "\n".join(lines)
-
-    return re.sub(
-        rf'^([ \t]*)from {re.escape(old_module)} import (\([^)]*\)|[^\n]+)$',
-        fix,
-        content,
-        flags=re.MULTILINE,
-    )
+            continue
+        kept = [e for e in imp.entries if e not in moving]
+        # the moved names keep their comments, and the statement's when nothing stays
+        comments = [c for _, c in moving if c] + ([] if kept else imp.comments)
+        moved = f"{imp.indent}from {new_module} import " + ", ".join(e for e, _ in moving)
+        moved += "".join("  " + c for c in comments)
+        text = import_text(imp, kept) + "\n" + moved if kept else moved
+        content = content[: imp.start] + text + content[imp.end :]
+    return content
 
 
 def move_name(content: str, old: str, new: str) -> str:
@@ -1738,17 +1992,24 @@ def private_removals(content: str, target: tuple[int, ...]) -> list[str]:
         module, name = dotted.rsplit(".", 1)
         if name not in words:
             continue
-        patterns = [rf'^\s*from {re.escape(module)} import .*\b{name}\b']
-        if pattern := name_pattern(aliases, dotted):
-            patterns.append(pattern)
-        if shown := hit_lines(lines, patterns):
+        patterns = [pattern] if (pattern := name_pattern(aliases, dotted)) else []
+        imported = {
+            content.count("\n", 0, imp.start) + 1
+            for imp in from_imports(content, module)
+            if any(entry_name(e) == name for e in imp.entries)
+        }
+        if shown := hit_lines(lines, patterns, imported):
             notes.append(f"line {shown}: private {dotted} was removed in {version_str(version)}")
     return notes
 
 
 # (pattern, game version it became a problem in, what to do about it)
 MANUAL_FIXES = [
-    (r'\.Context\(', (1, 7, 20), "ba.Context() is gone, use `with activity.context:`"),
+    (
+        r'\bContextRef\((?!\s*\))',
+        (1, 7, 20),
+        "ContextRef() takes no arguments, use activity.context / session.context or ContextRef.empty()",
+    ),
     (
         r'use `bascenev1\.apptimer`',
         (1, 7, 20),
@@ -1796,6 +2057,12 @@ MANUAL_FIXES = [
         (1, 7, 37),
         "the in-game menu is bauiv1lib.ingamemenu.InGameMenuWindow now",
     ),
+    (
+        r'\.set_main_menu_window\(',
+        (1, 7, 37),
+        "set_main_menu_window() is gone, the window has to be a bui.MainWindow:"
+        " call self.main_window_replace(lambda: MyWin()) from one, or set_main_window()",
+    ),
     (r'\bSceneV1AppMode\b', (1, 7, 37), "is baclassic.ClassicAppMode now"),
     (r'\bget_purchased\(', (1, 7, 37), "removed, use app.classic.purchases"),
     (
@@ -1824,21 +2091,72 @@ MANUAL_FIXES = [
         "Call/WeakCall change behavior when api 9 ends, use CallPartial/WeakCallPartial",
     ),
     (
-        r'bauiv1lib\.profile\.browser\b|^\s*from bauiv1lib\.profile import .*\bbrowser\b',
+        r'\bProfileBrowserWindow\b|bauiv1lib\.profile\.browser\b'
+        r'|^\s*from bauiv1lib\.profile import .*\bbrowser\b',
         (1, 7, 54),
-        "this ui module was removed",
+        "the profile browser is part of the doc-ui inventory now, open it with app.classic.profile_browser_window()",
     ),
     (
-        r'bauiv1lib\.(purchase|store\.browser)\b|^from bauiv1lib import .*\bpurchase\b',
+        r'\bInventoryWindow\b',
+        (1, 7, 54),
+        "InventoryWindow is a doc-ui page now: bauiv1lib.inventory.InventoryUIController",
+    ),
+    (
+        r'\bCloudUIWindow\b|bauiv1lib\.cloudui\b|^\s*from bauiv1lib import .*\bcloudui\b',
+        (1, 7, 54),
+        "cloudui was replaced by doc-ui, subclass bauiv1lib.docui.DocUIController",
+    ),
+    (
+        r'\bPurchaseWindow\b|bauiv1lib\.purchase\b|^\s*from bauiv1lib import .*\bpurchase\b',
         (1, 7, 60),
-        "this ui module was removed",
+        "PurchaseWindow was removed, purchases go through the doc-ui store: bauiv1lib.store.StoreUIController",
     ),
     (
-        r'bauiv1lib\.(play|playlist\.browser|settings\.allsettings)\b|^from bauiv1lib import .*\bplay\b'
-        r'|\bNewsDisplay\b|\bSendInfoWindow\b',
-        (1, 8, 0),
-        "this ui module/class was removed or replaced by a doc-ui version",
+        r'\bStoreBrowserWindow\b|bauiv1lib\.store\.(browser|item)\b'
+        r'|^\s*from bauiv1lib\.store import .*\b(browser|item)\b',
+        (1, 7, 60),
+        "the store is a doc-ui page now: bauiv1lib.store.StoreUIController",
     ),
+    (
+        r'\bPlayWindow\b|bauiv1lib\.play\b|^\s*from bauiv1lib import .*\bplay\b',
+        (1, 8, 0),
+        "PlayWindow is a doc-ui page now: bauiv1lib.playdocui.PlayController",
+    ),
+    (
+        r'\bPlaylistBrowserWindow\b|bauiv1lib\.playlist\.browser\b'
+        r'|^\s*from bauiv1lib\.playlist import .*\bbrowser\b',
+        (1, 8, 0),
+        "PlaylistBrowserWindow is a doc-ui page now: bauiv1lib.playlist.browserdocui.PlaylistBrowserController",
+    ),
+    (
+        r'\bAllSettingsWindow\b|bauiv1lib\.settings\.allsettings\b'
+        r'|^\s*from bauiv1lib\.settings import .*\ballsettings\b',
+        (1, 8, 0),
+        "AllSettingsWindow is a doc-ui page now: bauiv1lib.settings.allsettingsdocui.AllSettingsController",
+    ),
+    (
+        r'\b((Graphics|Audio|Advanced|Controls|Touchscreen)SettingsWindow|DevToolsWindow'
+        r'|BenchmarksAndStressTestsWindow)\b',
+        (1, 8, 0),
+        "the settings windows are doc-ui pages now, use the controller in the same module"
+        " (e.g. bauiv1lib.settings.graphics.GraphicsSettingsController)",
+    ),
+    (
+        r'\bInboxWindow\b|bauiv1lib\.inbox\b|^\s*from bauiv1lib import .*\binbox\b',
+        (1, 8, 0),
+        "InboxWindow is a doc-ui page now: bauiv1lib.inboxui.InboxUIController",
+    ),
+    (
+        r'\bChestWindow\d?\b|bauiv1lib\.chest\b|^\s*from bauiv1lib import .*\bchest\b',
+        (1, 8, 0),
+        "ChestWindow is a doc-ui page now: bauiv1lib.chestui.ChestUIController",
+    ),
+    (
+        r'\bSendInfoWindow\b',
+        (1, 8, 0),
+        "SendInfoWindow is a doc-ui page now: bauiv1lib.sendinfo.SendInfoController",
+    ),
+    (r'\bNewsDisplay\b', (1, 8, 0), "NewsDisplay was removed from the main menu, with no replacement"),
     (
         r'\b(builtinassets|classicassets|stdassets)\b',
         (1, 8, 0),
@@ -1865,12 +2183,12 @@ MANUAL_FIXES = [
 ]
 
 
-def hit_lines(lines: list[str], patterns: list[str]) -> str | None:
-    """Comma separated numbers of the non comment lines matching any pattern, or None."""
+def hit_lines(lines: list[str], patterns: list[str], extra: set[int] = frozenset()) -> str | None:
+    """Comma separated numbers of the non comment lines matching any pattern (or in extra), or None."""
     hits = [
         str(n)
         for n, line in enumerate(lines, 1)
-        if not line.lstrip().startswith('#') and any(re.search(p, line) for p in patterns)
+        if n in extra or (not line.lstrip().startswith('#') and any(re.search(p, line) for p in patterns))
     ]
     if not hits:
         return None
@@ -1888,7 +2206,11 @@ def manual_fixes(content: str, target: tuple[int, ...]) -> list[str]:
     # Outside of a game, timers need to be app timers since api 8
     if not is_game(content):
         scene = module_aliases(content, "bascenev1")
-        if scene and (shown := hit_lines(lines, [rf'\b({scene})\.(Timer|timer)\('])):
+        timers = rf'\b({scene})\.(Timer|timer)\('
+        if scene and re.search(timers, content):
+            in_game = game_class_lines(content)
+            lines = ["" if n in in_game else line for n, line in enumerate(lines, 1)]
+        if scene and (shown := hit_lines(lines, [timers])):
             notes.append(
                 f"line {shown}: game timers only work inside a game, for menu/ui/chat code "
                 "use --app-timers (a repeating bs.timer() needs a babase.AppTimer kept in a variable, by hand)"
@@ -1903,6 +2225,35 @@ def is_game(content: str) -> bool:
             r'^\s*#\s*ba_meta export bascenev1\.(GameActivity|Map)\b', content, flags=re.MULTILINE
         )
     )
+
+
+GAME_BASE = r'(?<![\w.])(?:\w+\.)*(\w*(Activity|Game|Actor|Session)|Map|\w*Spaz\w*)\b'
+
+
+def game_class_lines(content: str) -> set[int]:
+    """Line numbers inside top level classes deriving from an activity, game, session, map, actor or bot.
+
+    Game timers are right there even when the file only exports a Plugin
+    (plugins that register or patch games, or add bots).
+    """
+    try:
+        body = ast.parse(content).body
+    except SyntaxError:
+        return set()
+    lines = set()
+    for node in body:
+        if isinstance(node, ast.ClassDef) and any(re.search(GAME_BASE, ast.unparse(b)) for b in node.bases):
+            lines.update(range(node.lineno, node.end_lineno + 1))
+    return lines
+
+
+def line_starts(content: str) -> list[int]:
+    """Offsets where each line starts, for line_number()."""
+    return [0] + [m.end() for m in re.finditer(r'\n', content)]
+
+
+def line_number(starts: list[int], offset: int) -> int:
+    return bisect_right(starts, offset)
 
 
 def module_aliases(content: str, *modules: str) -> str:
@@ -1938,19 +2289,73 @@ def call_args(content: str, start: int) -> tuple[int, list[str]] | None:
     return None
 
 
+def context_refs(content: str) -> str:
+    """Rewrites api 7 babase.Context(x) calls (after ba.X became babase.X) to api 8.
+
+    ContextRef() takes no args: 'ui' and 'empty' are ContextRef.empty() now,
+    'current' is ContextRef(), and an activity or session gives its .context.
+    Other references to the class are babase.ContextRef.
+    """
+
+    def call(_: re.Match, args: list[str] | None) -> str | None:
+        if args is None or len(args) != 1:
+            return None
+        arg = args[0].strip()
+        try:
+            node = ast.parse(arg, mode="eval").body
+        except SyntaxError:
+            return None
+        if isinstance(node, ast.Constant) and node.value in ("ui", "UI", "empty"):
+            return "babase.ContextRef.empty()"
+        if isinstance(node, ast.Constant) and node.value == "current":
+            return "babase.ContextRef()"
+        if isinstance(node, (ast.Name, ast.Attribute, ast.Call, ast.Subscript)):
+            return f"{arg}.context"
+        return f"({arg}).context"
+
+    content = replace_calls(content, r'\bbabase\.Context\s*\(', call)
+    return re.sub(r'\bbabase\.Context\b', "babase.ContextRef", content)
+
+
+def print_to_logging(content: str, pattern: str, kind: str) -> str:
+    """Rewrites the print_exception()/print_error() calls pattern matches (up to their `(`) to logging.
+
+    The old functions printed str() of their positional args joined by spaces
+    and took once=True (print once per call location), which logging doesn't
+    have, so once is dropped and extra args become a '%s %s' format. Calls
+    baport can't split keep their args.
+    """
+
+    def call(_: re.Match, args: list[str] | None) -> str:
+        if args is None:
+            return f"logging.{kind}("
+        args = [a.strip() for a in args if not re.match(r'\s*once\s*=', a)] or ["'Error'"]
+        if len(args) > 1:
+            args = [repr(" ".join(["%s"] * len(args)))] + args
+        return f"logging.{kind}({', '.join(args)})"
+
+    return replace_calls(content, pattern, call)
+
+
 def use_app_timers(content: str) -> str:
     """Turns game timers into app timers, for code that runs outside of games.
 
     bs.Timer() becomes babase.AppTimer() (same arguments). bs.timer() becomes
-    babase.apptimer(), unless it repeats, since apptimer() can't.
+    babase.apptimer(), unless it repeats, since apptimer() can't. Timers in
+    game, session, actor or bot classes are left alone.
     """
     scene = module_aliases(content, "bascenev1")
     if not scene or not re.search(rf'\b({scene})\.(Timer|timer)\(', content):
         return content
     content, base = module_alias(content, "babase")
-    content = re.sub(rf'\b(?:{scene})\.Timer\(', f"{base}.AppTimer(", content)
+    in_game = game_class_lines(content)
+    starts = line_starts(content)
 
-    def timer(match: re.Match) -> str:
+    def convert(match: re.Match) -> str:
+        if line_number(starts, match.start()) in in_game:
+            return match.group(0)
+        if match.group(1) == "Timer":
+            return f"{base}.AppTimer("
         parsed = call_args(content, match.end())
         if parsed is None:
             return match.group(0)
@@ -1958,12 +2363,23 @@ def use_app_timers(content: str) -> str:
         repeats = len(args) > 2 or any(re.match(r'\s*repeat\s*=', a) for a in args)
         return match.group(0) if repeats else f"{base}.apptimer("
 
-    return re.sub(rf'\b(?:{scene})\.timer\(', timer, content)
+    return re.sub(rf'\b(?:{scene})\.(Timer|timer)\(', convert, content)
 
 
 def source_api(content: str) -> int | None:
+    """The plugin's `# ba_meta require api`, or None for api 6/7.
+
+    Helper modules have no such line, so their imports decide: only api 8+
+    modules (babase, bascenev1, ...) means 8, which keeps an already ported
+    helper from getting the api 7 port again.
+    """
     match = re.search(r'^\s*#\s*ba_meta require api (\d+)', content, flags=re.MULTILINE)
-    return int(match.group(1)) if match else None
+    if match:
+        return int(match.group(1))
+    modules = {m.split(".")[0] for m in re.findall(r'^\s*(?:import|from)\s+([\w.]+)', content, flags=re.MULTILINE)}
+    if modules & {"ba", "_ba", "bastd", "_bainternal"}:
+        return None
+    return 8 if modules & {"babase", "_babase", "bascenev1", "_bascenev1", "bauiv1", "_bauiv1"} else None
 
 
 def target_api(target: tuple[int, ...]) -> int:
