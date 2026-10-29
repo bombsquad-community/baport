@@ -1,0 +1,4 @@
+Porting api8_last_punch_stand.py (api 8) to 1.8.5 (api 9)
+  changes from: 1.7.37
+  deprecated (works until api 9 support ends):
+    line 123: Lstr is going away when api 9 ends, migrate to LangStr

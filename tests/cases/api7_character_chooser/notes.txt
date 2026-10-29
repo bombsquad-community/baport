@@ -1,0 +1,8 @@
+Porting api7_character_chooser.py (api 7) to 1.8.5 (api 9)
+  changes from: 1.7.20, 1.7.37, 1.7.39, 1.7.44, 1.7.63
+  must fix (fails on load or when that code runs):
+    line 161, 168: the profile browser is part of the doc-ui inventory now, open it with app.classic.profile_browser_window()
+    line 172: private _babase.set_ui_input_device was removed in 1.7.44
+  deprecated (works until api 9 support ends):
+    line 143, 317, 319, 321, 324, 326, 328: Lstr is going away when api 9 ends, migrate to LangStr
+    line 178, 181, 184, 187, 190, 194, 206, 208, 210, 214: Call/WeakCall change behavior when api 9 ends, use CallPartial/WeakCallPartial

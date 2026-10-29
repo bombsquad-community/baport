@@ -1,0 +1,9 @@
+Porting api7_advanced_party_window.py (api 7) to 1.8.5 (api 9)
+  changes from: 1.7.20, 1.7.37, 1.7.39, 1.7.44, 1.7.53, 1.7.63, 1.8.0
+  must fix (fails on load or when that code runs):
+    line 204: _ba is used but never defined or imported
+    line 211, 213: TimeType is gone, timers take seconds (use babase.AppTimer for real time)
+    line 843: private _babase.reset_game_activity_tracking was removed in 1.7.20
+  deprecated (works until api 9 support ends):
+    line 386, 396, 474, 569, 601, 793, 837, 847, 888, 890, ...: Lstr is going away when api 9 ends, migrate to LangStr
+    line 1734: Call/WeakCall change behavior when api 9 ends, use CallPartial/WeakCallPartial

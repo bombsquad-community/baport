@@ -1,0 +1,8 @@
+Porting api7_practice_tools.py (api 7) to 1.8.5 (api 9)
+  changes from: 1.7.20, 1.7.27, 1.7.35, 1.7.37, 1.7.39, 1.7.44, 1.7.53, 1.8.0
+  must fix (fails on load or when that code runs):
+    line 54, 141: ba.internal is gone, its names moved to babase/bascenev1/bauiv1 or app.classic/app.plus
+    line 139: _ba is used but never defined or imported
+    line 1592: use_toolbars is gone, replace it with True or False
+  deprecated (works until api 9 support ends):
+    line 722, 989, 1258, 1330, 1417, 1444: Lstr is going away when api 9 ends, migrate to LangStr

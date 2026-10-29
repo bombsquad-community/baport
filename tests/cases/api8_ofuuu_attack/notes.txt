@@ -1,0 +1,6 @@
+Porting api8_ofuuu_attack.py (api 8) to 1.8.5 (api 9)
+  changes from: 1.7.37, 1.8.0
+  deprecated (works until api 9 support ends):
+    line 173, 201: use get_preview_texture() / preview_texture= with an asset-package wrapper instead
+    line 285: the game calls this with langstr=True and wants a babase.LangStr then (LangStr.from_text(...)), the Lstr only without it
+    line 305: Lstr is going away when api 9 ends, migrate to LangStr

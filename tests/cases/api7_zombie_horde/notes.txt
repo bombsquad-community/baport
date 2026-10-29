@@ -1,0 +1,8 @@
+Porting api7_zombie_horde.py (api 7) to 1.8.5 (api 9)
+  changes from: 1.7.20, 1.7.37, 1.7.39, 1.7.44, 1.7.53
+  must fix (fails on load or when that code runs):
+    line 135: Spaz is used but never defined or imported
+    line 258, 259: builtin characters are packaged spaz defs now, so their media parts are empty: restyle a spaz with SpazFactory.get_look_attrs(character)
+  deprecated (works until api 9 support ends):
+    line 289, 338: Lstr is going away when api 9 ends, migrate to LangStr
+    line 883: use get_preview_texture() / preview_texture= with an asset-package wrapper instead

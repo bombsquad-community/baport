@@ -1,0 +1,3 @@
+Porting api9_sleep_on_afk.py (api 9) to 1.8.5 (api 9)
+  must fix (fails on load or when that code runs):
+    line 93: game timers only work inside a game, for menu/ui/chat code use --app-timers (a repeating bs.timer() needs a babase.AppTimer kept in a variable, by hand)

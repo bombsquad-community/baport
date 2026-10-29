@@ -31,10 +31,12 @@ import ast
 from bisect import bisect_right
 import builtins
 import difflib
+import io
 from functools import lru_cache
 from pathlib import Path
 import re
 import sys
+import tokenize
 from typing import Callable, NamedTuple
 
 TRADEMARK = "# Porting made easier by baport.(https://github.com/bombsquad-community/baport)\n"
@@ -124,6 +126,15 @@ def ensure_import(content: str, module: str) -> str:
     if re.search(rf'^\s*import\s+{re.escape(module)}\s*$', content, flags=re.MULTILINE):
         return content
     return add_import(content, f"import {module}")
+
+
+class Note(NamedTuple):
+    """Something baport couldn't port, at these line numbers."""
+
+    lines: list[int]
+    message: str
+    # still works, until api 9 support ends
+    deprecated: bool = False
 
 
 class FromImport(NamedTuple):
@@ -248,6 +259,18 @@ def bare_names(names: set[str]) -> str | None:
     return rf'(?<![\w.])(?<!def )(?:{"|".join(map(re.escape, sorted(names)))})'
 
 
+def take_imported(content: str, modules: tuple[str, ...], name: str) -> tuple[str, str | None]:
+    """Drops name from `from module import ...` for each of modules.
+
+    Returns (content, bare_names() of the local names those imports bound),
+    for rewriting the uses that go through them.
+    """
+    local = set().union(*(imported_as(content, m, name) for m in modules))
+    for module in modules:
+        content = drop_import_name(content, module, name)
+    return content, bare_names(local)
+
+
 def drop_import_name(content: str, module: str, name: str) -> str:
     """Removes name from `from module import ...` statements, dropping ones left empty."""
     for imp in reversed(from_imports(content, module)):
@@ -289,16 +312,17 @@ def drop_removed_function(content: str, module: str, name: str) -> str:
     forms = [rf'(?<![\w.])(?:_?ba\w*|_?bui|_?bs|{"|".join(map(re.escape, ba_aliases(content))) or "_?ba"})\.{name}\b']
     # api 7's _ba (now _babase) had all the native functions
     modules = (module, "_" + module, "_babase")
-    local = set().union(*(imported_as(content, m, name) for m in modules))
-    for m in modules:
-        content = drop_import_name(content, m, name)
-    forms += [rf'{bare}\b'] if (bare := bare_names(local)) else []
+    used = {m for m in modules[1:] if re.search(rf'\b{m}\.', content)}
+    content, bare = take_imported(content, modules, name)
+    forms += [rf'{bare}\b'] if bare else []
     for form in forms:
         content = replace_calls(content, rf'{form}\s*\(', lambda _, args: "None" if args is not None else None)
         # assigning to it only adds an attribute, so leave that alone
         content = re.sub(rf'{form}(?!\s*=[^=])', "(lambda *args, **kwargs: None)", content)
-    # the private module the api 7 port imported for it
-    return drop_module_import(content, "_" + module, unless_used=True)
+    # private module imports only this used (the api 7 port imports them for such names)
+    for private in used:
+        content = drop_module_import(content, private, unless_used=True)
+    return content
 
 
 def module_alias(content: str, *modules: str) -> tuple[str, str]:
@@ -560,10 +584,16 @@ class Api7:
 
     @change("1.7.7")
     def v1_7_7(content: str) -> str:
-        """in_game_thread() is in_logic_thread(), getlog()/get_log_file_path() are get_v1_cloud_log()/get_v1_cloud_log_file_path()."""
+        """in_game_thread() is in_logic_thread(), getlog()/get_log_file_path() are get_v1_cloud_log()/get_v1_cloud_log_file_path(), _ba's account and store calls are ba.internal's."""
         content = re.sub(r'\.in_game_thread\b', ".in_logic_thread", content)
         content = re.sub(r'\.getlog\b', ".get_v1_cloud_log", content)
-        return re.sub(r'\.get_log_file_path\b', ".get_v1_cloud_log_file_path", content)
+        content = re.sub(r'\.get_log_file_path\b', ".get_v1_cloud_log_file_path", content)
+        # they went to the closed source _bainternal, which plugins use through ba.internal
+        before = content
+        for name in BAINTERNAL_1_7_7:
+            content = move_name(content, f"_ba.{name}", f"ba.internal.{name}")
+        # a submodule, `import ba` alone doesn't load it
+        return ensure_import(content, "ba.internal") if content != before else content
 
     @change("1.7.14")
     def v1_7_14(content: str) -> str:
@@ -690,6 +720,7 @@ class Api8:
             "babase.app.stress_test_reset_timer", "_babase.app.classic.stress_test_reset_timer"
         )
         # api 7's ba held the scene's private modules, as `ba._x` or `from ba import _x`
+        content = campaign_lookups(content)
         content = re.sub(rf'\bbabase\.({"|".join(SCENE_PRIVATE_MODULES)})\b', r'bascenev1.\1', content)
         for module in {entry_name(e) for imp in from_imports(content, "babase") for e in imp.entries} & set(
             SCENE_PRIVATE_MODULES
@@ -747,7 +778,6 @@ class Api8:
         content = content.replace(
             "babase.app.add_coop_practice_level", "babase.app.classic.add_coop_practice_level"
         )
-        content = campaign_lookups(content)
         content = content.replace("babase._campaign", "bascenev1._campaign")
         content = content.replace("babase.Level", "bascenev1._level.Level")
         content = content.replace(
@@ -1002,7 +1032,6 @@ class Api8:
             "babase.internal.get_v1_account_type", "bauiv1.app.plus.get_v1_account_type"
         )
         content = content.replace("babase.internal.get_v2_fleet", "_baplus.get_v2_fleet")
-        content = content.replace("babase.internal.getcampaign", "bauiv1.app.classic.getcampaign")
         content = content.replace("babase.internal.getclass", "babase.getclass")
         content = content.replace("babase.internal.getinputdevice", "bascenev1.getinputdevice")
         content = content.replace("babase.internal.has_gamma_control", "babase.has_gamma_control")
@@ -1237,6 +1266,8 @@ class Api8:
     )
     def v1_7_20_private(content: str) -> str:
         """private: api 7's _ba names the api 7 port left in _babase move to _bascenev1/_bauiv1/_baclassic, 4 removed."""
+        if "_babase" not in content:
+            return content
         for module, names in API7_NATIVE_MOVES.items():
             for name in names:
                 content = move_name(content, f"_babase.{name}", f"{module}.{name}")
@@ -1449,9 +1480,8 @@ class Api9:
             content = content.replace("efro.call.tpartial", "functools.partial")
             content = ensure_import(content, "functools")
         # enum_by_value(MyEnum, foo) is just MyEnum(foo)
-        local = imported_as(content, "efro.util", "enum_by_value")
-        content = drop_import_name(content, "efro.util", "enum_by_value")
-        names = "|".join(filter(None, [r'\b(?:[\w.]+\.)?enum_by_value', bare_names(local)]))
+        content, bare = take_imported(content, ("efro.util",), "enum_by_value")
+        names = "|".join(filter(None, [r'\b(?:[\w.]+\.)?enum_by_value', bare]))
         content = re.sub(rf'(?:{names})\(\s*([\w.]+)\s*,\s*', r'\1(', content)
         # the party icon is always visible now
         content = replace_calls(
@@ -1529,11 +1559,9 @@ class Api9:
         modules = {imp.module for imp in from_imports(content) if re.fullmatch(r'_?ba[\w.]*', imp.module)}
         used = False
         for kind in ("exception", "error"):
-            local = set().union(*(imported_as(content, m, f"print_{kind}") for m in modules))
-            for module in modules:
-                content = drop_import_name(content, module, f"print_{kind}")
+            content, bare = take_imported(content, tuple(modules), f"print_{kind}")
             pattern = rf'\b(?:{aliases})\.print_{kind}'
-            if bare := bare_names(local):
+            if bare:
                 pattern = rf'(?:{pattern}|{bare})'
             if re.search(rf'{pattern}\(', content):
                 content = print_to_logging(content, rf'{pattern}\(', kind)
@@ -1823,13 +1851,17 @@ class Api9:
         content = re.sub(r'\bon_return_press_call\s*=', "on_submit_call=", content)
         content = re.sub(r'\binvoke_return_press\s*=', "invoke_submit=", content)
         # the game passes langstr=True to these now (and wants a LangStr back then)
+        def add_langstr(m: re.Match) -> str:
+            params = m.group(2)
+            if re.search(r'\blangstr\b|\*\*', params):
+                return m.group(0)
+            star = "" if re.search(r'(^|,)\s*\*', params) else "*, "
+            return f"{m.group(1)}{params}, {star}langstr: bool = False{m.group(3)}"
+
         content = re.sub(
             r'(\bdef (?:get_instance_display_string|get_instance_scoreboard_display_string'
             r'|get_display_string|get_team_display_string)\s*\()([^)]*?)(\s*,?\s*\))',
-            lambda m: m.group(0)
-            if re.search(r'\blangstr\b|\*\*', m.group(2))
-            else f"{m.group(1)}{m.group(2)}, {'' if re.search(r'(^|,)\s*\*', m.group(2)) else '*, '}langstr: bool = False"
-            + m.group(3),
+            add_langstr,
             content,
         )
         return actor_activity_refs(content)
@@ -2013,10 +2045,10 @@ def move_name(content: str, old: str, new: str) -> str:
     return content
 
 
-def private_removals(content: str, target: tuple[int, ...]) -> list[str]:
+def private_removals(content: str, target: tuple[int, ...]) -> list[Note]:
     """Notes for private names the plugin uses that are gone in the target version."""
     aliases = ba_aliases(content)
-    lines = content.splitlines()
+    lines = content.split("\n")
     gone: dict[str, tuple[int, ...]] = {}
     for step in CHANGES:
         if step.version > target:
@@ -2038,12 +2070,15 @@ def private_removals(content: str, target: tuple[int, ...]) -> list[str]:
             for imp in from_imports(content, module)
             if any(entry_name(e) == name for e in imp.entries)
         }
-        if shown := hit_lines(lines, patterns, imported):
-            notes.append(f"line {shown}: private {dotted} was removed in {version_str(version)}")
+        if hits := hit_lines(lines, patterns, imported):
+            notes.append(Note(hits, f"private {dotted} was removed in {version_str(version)}"))
     return notes
 
 
-# (pattern, game version it became a problem in, what to do about it)
+# Marks a MANUAL_FIXES entry for something that still works, until api 9 support ends
+DEPRECATED = True
+
+# (pattern, game version it became a problem in, what to do about it[, DEPRECATED])
 MANUAL_FIXES = [
     (
         r'\bContextRef\((?!\s*\))',
@@ -2137,6 +2172,7 @@ MANUAL_FIXES = [
         r'\b(WeakCall|Call)\(',
         (1, 7, 53),
         "Call/WeakCall change behavior when api 9 ends, use CallPartial/WeakCallPartial",
+        DEPRECATED,
     ),
     (
         r'\bProfileBrowserWindow\b|bauiv1lib\.profile\.browser\b'
@@ -2215,7 +2251,7 @@ MANUAL_FIXES = [
         (1, 8, 0),
         "the engine's asset wrapper modules are private now, bundle your own",
     ),
-    (r'\bcharstr\b', (1, 8, 0), "charstr() is deprecated, use SpecialChar.X.value"),
+    (r'\bcharstr\b', (1, 8, 0), "use SpecialChar.X.value instead of charstr()", DEPRECATED),
     (
         r'\bDependencySet\b|\bdepsets\b',
         (1, 8, 0),
@@ -2229,22 +2265,24 @@ MANUAL_FIXES = [
     (
         r'preview_texture_name',
         (1, 8, 0),
-        "deprecated, use get_preview_texture() / preview_texture= with an asset-package wrapper",
+        "use get_preview_texture() / preview_texture= with an asset-package wrapper instead",
+        DEPRECATED,
     ),
-    (r'\bclipboard_get_text\(', (1, 8, 0), "deprecated, use clipboard_get_text_async(callback)"),
+    (r'\bclipboard_get_text\(', (1, 8, 0), "use clipboard_get_text_async(callback) instead", DEPRECATED),
     (
         r'\.get_media\(|\bspaz_media\b',
         (1, 8, 1),
         "builtin characters are packaged spaz defs now, so their media parts are empty:"
         " restyle a spaz with SpazFactory.get_look_attrs(character)",
     ),
-    (r'\bLstr\(', (1, 8, 0), "Lstr is going away when api 9 ends, migrate to LangStr"),
+    (r'\bLstr\(', (1, 8, 0), "Lstr is going away when api 9 ends, migrate to LangStr", DEPRECATED),
     (
         r'\bdef (get_instance_display_string|get_instance_scoreboard_display_string'
         r'|get_display_string|get_team_display_string)\(',
         (1, 8, 0),
         "the game calls this with langstr=True and wants a babase.LangStr then"
         " (LangStr.from_text(...)), the Lstr only without it",
+        DEPRECATED,
     ),
     (
         r'\bget_button_name\(',
@@ -2254,26 +2292,23 @@ MANUAL_FIXES = [
 ]
 
 
-def hit_lines(lines: list[str], patterns: list[str], extra: set[int] = frozenset()) -> str | None:
-    """Comma separated numbers of the non comment lines matching any pattern (or in extra), or None."""
-    hits = [
-        str(n)
+def hit_lines(lines: list[str], patterns: list[str], extra: set[int] = frozenset()) -> list[int]:
+    """Numbers of the non comment lines matching any pattern (or in extra)."""
+    return [
+        n
         for n, line in enumerate(lines, 1)
         if n in extra or (not line.lstrip().startswith('#') and any(re.search(p, line) for p in patterns))
     ]
-    if not hits:
-        return None
-    return ", ".join(hits[:10]) + (", ..." if len(hits) > 10 else "")
 
 
-def manual_fixes(content: str, target: tuple[int, ...]) -> list[str]:
+def manual_fixes(content: str, target: tuple[int, ...]) -> list[Note]:
     notes = []
-    lines = content.splitlines()
-    for pattern, since, message in MANUAL_FIXES:
+    lines = content.split("\n")
+    for pattern, since, message, *deprecated in MANUAL_FIXES:
         if target < since:
             continue
-        if shown := hit_lines(lines, [pattern]):
-            notes.append(f"line {shown}: {message}")
+        if hits := hit_lines(lines, [pattern]):
+            notes.append(Note(hits, message, bool(deprecated)))
     # Outside of a game, timers need to be app timers since api 8
     if not is_game(content):
         scene = module_aliases(content, "bascenev1")
@@ -2281,14 +2316,16 @@ def manual_fixes(content: str, target: tuple[int, ...]) -> list[str]:
         if scene and re.search(timers, content):
             in_game = scope_of(content).lines
             lines = ["" if n in in_game else line for n, line in enumerate(lines, 1)]
-            if shown := hit_lines(lines, [timers]):
+            if hits := hit_lines(lines, [timers]):
                 notes.append(
-                    f"line {shown}: game timers only work inside a game, for menu/ui/chat code "
-                    "use --app-timers (a repeating bs.timer() needs a babase.AppTimer kept in a variable, by hand)"
+                    Note(
+                        hits,
+                        "game timers only work inside a game, for menu/ui/chat code use --app-timers"
+                        " (a repeating bs.timer() needs a babase.AppTimer kept in a variable, by hand)",
+                    )
                 )
     for name, numbers in undefined_names(content).items():
-        shown = ", ".join(map(str, numbers[:10])) + (", ..." if len(numbers) > 10 else "")
-        notes.append(f"line {shown}: {name} is used but never defined or imported")
+        notes.append(Note(numbers, f"{name} is used but never defined or imported"))
     return notes
 
 
@@ -2357,6 +2394,7 @@ def is_game(content: str) -> bool:
 SCENE_LIBRARY = re.compile(r'(?:bascenev1lib|bastd)\.(?:actor|game)\b')
 
 
+@lru_cache(maxsize=4)
 def library_imports(tree: ast.Module) -> set[str]:
     """Names bound to bascenev1lib.actor/.game modules or their classes (api 7: bastd)."""
     imported = set()
@@ -2632,6 +2670,19 @@ class Scope:
 scope_of = lru_cache(maxsize=4)(Scope)
 
 
+FUNCTIONS = (ast.FunctionDef, ast.AsyncFunctionDef)
+
+
+def own_nodes(scope: ast.AST):
+    """Nodes inside scope that aren't inside a function, lambda or class nested in it (those come themselves)."""
+    pending = list(ast.iter_child_nodes(scope))
+    while pending:
+        node = pending.pop()
+        yield node
+        if not isinstance(node, (*FUNCTIONS, ast.Lambda, ast.ClassDef)):
+            pending += ast.iter_child_nodes(node)
+
+
 def game_function_lines(tree: ast.Module, classes: dict[str, tuple[str, int, int]]) -> set[int]:
     """Lines of functions that run inside a game, wherever they are defined.
 
@@ -2651,33 +2702,32 @@ def game_function_lines(tree: ast.Module, classes: dict[str, tuple[str, int, int
 
     # by scope: the patched name is a function defined next to (or above) the assignment
     patched = set()
-    for scope in ast.walk(tree):
-        if not isinstance(scope, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
-            continue
-        defs = {f.name: f for f in scope.body if isinstance(f, (ast.FunctionDef, ast.AsyncFunctionDef))}
-        for node in ast.walk(scope) if defs else []:
-            if isinstance(node, ast.Assign) and any(
+
+    def visit(scope: ast.AST, visible: dict[str, ast.AST]) -> None:
+        visible = visible | {f.name: f for f in scope.body if isinstance(f, FUNCTIONS)}
+        for node in own_nodes(scope):
+            if isinstance(node, (*FUNCTIONS, ast.ClassDef)):
+                visit(node, visible)
+            elif isinstance(node, ast.Assign) and any(
                 isinstance(t, ast.Attribute) and scene_target(t.value) for t in node.targets
             ):
                 value = node.value.func if isinstance(node.value, ast.Call) else node.value
-                if isinstance(value, ast.Name) and value.id in defs:
-                    patched.add(id(defs[value.id]))
+                if isinstance(value, ast.Name) and value.id in visible:
+                    patched.add(id(visible[value.id]))
+
+    visit(tree, {})
 
     def own_calls(function: ast.AST) -> set[str]:
         """Names of what function calls itself, not in functions nested in it."""
-        found, pending = set(), list(ast.iter_child_nodes(function))
-        while pending:
-            node = pending.pop()
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)):
-                continue
-            if isinstance(node, ast.Call):
-                found.add(getattr(node.func, "attr", None) or getattr(node.func, "id", None))
-            pending += ast.iter_child_nodes(node)
-        return found
+        return {
+            getattr(n.func, "attr", None) or getattr(n.func, "id", None)
+            for n in own_nodes(function)
+            if isinstance(n, ast.Call)
+        }
 
     lines = set()
     for node in ast.walk(tree):
-        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        if not isinstance(node, FUNCTIONS):
             continue
         args = node.args.posonlyargs + node.args.args + node.args.kwonlyargs
         if (
@@ -2731,6 +2781,17 @@ def call_args(content: str, start: int) -> tuple[int, list[str]] | None:
     return None
 
 
+# _ba functions that moved to _bainternal (ba.internal) in 1.7.7
+BAINTERNAL_1_7_7 = """
+    add_transaction game_service_has_leaderboard get_master_server_address get_news_show get_price
+    get_public_login_id get_purchased get_purchases_state get_v1_account_display_string
+    get_v1_account_misc_read_val get_v1_account_misc_read_val_2 get_v1_account_misc_val
+    get_v1_account_name get_v1_account_state get_v1_account_state_num get_v1_account_ticket_count
+    get_v1_account_type get_v2_fleet have_outstanding_transactions in_game_purchase is_blessed
+    mark_config_dirty power_ranking_query purchase report_achievement reset_achievements
+    restore_purchases run_transactions sign_in_v1 sign_out_v1 submit_score tournament_query
+""".split()
+
 # Native functions api 7's _ba had that 1.7.20 moved to another native module
 # (names in both _bascenev1 and _bauiv1 follow the plugin type, see fix_misplaced_names)
 API7_NATIVE_MOVES = {
@@ -2767,6 +2828,11 @@ SCENE_PRIVATE_MODULES = """
     _lobby _map _messages _multiteamsession _music _nodeactor _player _playlist _powerup _profile
     _score _session _settings _stats _teamgame _team
 """.split()
+
+
+def operand(text: str) -> str:
+    """text, in parens unless it can take `.attr` as it is."""
+    return text if simple_expression(text) else f"({text})"
 
 
 def simple_expression(text: str) -> bool:
@@ -2822,24 +2888,26 @@ def playsound_calls(content: str) -> str:
         sounds = [a for a in args if re.match(r'sound\s*=', a)]
         sound = re.sub(r'^sound\s*=\s*', "", sounds[0]) if sounds else args[0]
         rest = [a for a in args if a not in (sounds[:1] or args[:1])]
-        if not simple_expression(sound):
-            sound = f"({sound})"
-        return f"{sound}.play({', '.join(rest)})"
+        return f"{operand(sound)}.play({', '.join(rest)})"
+
+    def callback(match: re.Match, args: list[str] | None) -> str | None:
+        if not args or len(args) < 2 or not re.fullmatch(r'\s*_?babase\.playsound\s*', args[0]):
+            return None
+        played = [operand(args[1].strip()) + ".play"] + [a.strip() for a in args[2:]]
+        return f"{match.group(0)}{', '.join(played)})"
 
     # passed as a callback: Call(babase.playsound, sound, ...) is Call(sound.play, ...)
-    content = re.sub(
-        r'\b((?:\w+\.)?(?:Weak)?Call(?:Partial)?\(\s*)_?babase\.playsound\s*,\s*([\w.]+)\s*(?=[,)])',
-        r'\1\2.play',
-        content,
-    )
+    content = replace_calls(content, r'\b(?:\w+\.)?(?:Weak)?Call(?:Partial)?\s*\(', callback)
     return replace_calls(content, r'(?<![\w.])_?babase\.playsound\s*\(', call)
 
 
 def campaign_lookups(content: str) -> str:
-    """Rewrites api 7's babase._campaign.getcampaign (after ba.X became babase.X) to babase.app.classic.getcampaign."""
-    local = imported_as(content, "babase._campaign", "getcampaign")
-    content = drop_import_name(content, "babase._campaign", "getcampaign")
-    names = "|".join(filter(None, [r'(?<![\w.])babase\._campaign\.getcampaign', bare_names(local)]))
+    """Rewrites api 7's getcampaign (ba._campaign's or ba.internal's, after ba.X became babase.X) to babase.app.classic.getcampaign.
+
+    Runs before babase._campaign becomes bascenev1._campaign, which has no getcampaign.
+    """
+    content, bare = take_imported(content, ("babase._campaign", "babase.internal"), "getcampaign")
+    names = "|".join(filter(None, [r'(?<![\w.])babase\.(?:_campaign|internal)\.getcampaign', bare]))
     if not re.search(rf'(?:{names})\b', content):
         return content
     content = re.sub(rf'(?:{names})\b(?!\s*=[^=])', "babase.app.classic.getcampaign", content)
@@ -2866,7 +2934,7 @@ def context_refs(content: str) -> str:
             return f"{match.group(1)}.ContextRef.empty()"
         if isinstance(node, ast.Constant) and node.value == "current":
             return f"{match.group(1)}.ContextRef()"
-        return f"{arg}.context" if simple_expression(arg) else f"({arg}).context"
+        return f"{operand(arg)}.context"
 
     content = replace_calls(content, r'(?<![\w.])(_?babase)\.Context\s*\(', call)
     return re.sub(r'(?<![\w.])(_?babase)\.Context\b', r'\1.ContextRef', content)
@@ -2939,6 +3007,54 @@ def target_api(target: tuple[int, ...]) -> int:
     return max(api for api, first in API_FIRST_VERSION.items() if target >= first)
 
 
+MARKER = re.compile(r'[ \t]*# baport(?:, deprecated)?: [^\n]*$', flags=re.MULTILINE)
+
+
+def mark_notes(content: str, notes: list[Note]) -> str:
+    """Appends a `# baport: ...` comment with the notes to each line they are about.
+
+    Lines that can't take a comment (inside a string, or continued with a
+    backslash) are left alone. MARKER finds them again, so a new port
+    replaces them.
+    """
+    try:
+        tokens = list(tokenize.generate_tokens(io.StringIO(content).readline))
+    except (tokenize.TokenError, SyntaxError):
+        return content
+    # a NEWLINE/NL token on a line means it ends outside of any string
+    open_ends = {t.start[0] for t in tokens if t.type in (tokenize.NEWLINE, tokenize.NL)}
+    on_line: dict[int, list[Note]] = {}
+    for note in notes:
+        for n in note.lines:
+            if n in open_ends:
+                on_line.setdefault(n, []).append(note)
+    lines = content.split("\n")
+    for n, here in on_line.items():
+        # a line with only deprecated notes says so once, mixed ones per note
+        if all(note.deprecated for note in here):
+            tag, texts = "baport, deprecated", [note.message for note in here]
+        else:
+            here.sort(key=lambda note: note.deprecated)
+            tag, texts = "baport", [("deprecated: " if note.deprecated else "") + note.message for note in here]
+        lines[n - 1] = f"{lines[n - 1].rstrip()}  # {tag}: {'; '.join(texts)}"
+    return "\n".join(lines)
+
+
+def print_notes(notes: list[Note]) -> None:
+    def shown(numbers: list[int]) -> str:
+        return ", ".join(map(str, numbers[:10])) + (", ..." if len(numbers) > 10 else "")
+
+    for deprecated, heading in (
+        (False, "must fix (fails on load or when that code runs):"),
+        (True, "deprecated (works until api 9 support ends):"),
+    ):
+        group = [n for n in notes if n.deprecated == deprecated]
+        if group:
+            print(f"  {heading}")
+        for note in sorted(group, key=lambda n: n.lines[0]):
+            print(f"    line {shown(note.lines)}: {note.message}")
+
+
 def port(
     content: str,
     plugin_type: str | None,
@@ -2953,6 +3069,8 @@ def port(
     into app timers, for plugins that run outside of games. private includes
     the private api moves.
     """
+    # markers from an earlier port go, main() marks the new notes
+    content = MARKER.sub("", content)
     api = source_api(content) or 7
     start = API_FIRST_VERSION.get(api, (0,))
     applied = []
@@ -3053,6 +3171,13 @@ def main() -> None:
         help="List the changes baport applies for each game version, up to -v.",
     )
     parser.add_argument(
+        "--mark",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Mark each line baport couldn't port with a '# baport: ...' comment, porting again "
+        "replaces them (default: on, --no-mark to leave them out and remove old ones).",
+    )
+    parser.add_argument(
         "-n", "--dry-run", action="store_true", help="Print a diff instead of writing the file."
     )
     if len(sys.argv) == 1:
@@ -3110,6 +3235,11 @@ def main() -> None:
             print("  --app-timers ignored, this is a minigame or map and needs game timers")
         if applied:
             print("  changes from: " + ", ".join(version_str(v) for v in applied))
+        notes = manual_fixes(new_text, args.version)
+        if args.private:
+            notes += private_removals(new_text, args.version)
+        if args.mark:
+            new_text = mark_notes(new_text, notes)
         if args.dry_run:
             sys.stdout.writelines(
                 difflib.unified_diff(
@@ -3122,11 +3252,7 @@ def main() -> None:
         else:
             with open(file_path, 'w', encoding=encoding) as write_f:
                 write_f.write(new_text)
-        notes = manual_fixes(new_text, args.version)
-        if args.private:
-            notes += private_removals(new_text, args.version)
-        for note in notes:
-            print(f"  manual fix needed, {note}")
+        print_notes(notes)
     if failed:
         exit(1)
 

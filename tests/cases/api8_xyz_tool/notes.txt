@@ -1,0 +1,4 @@
+Porting api8_xyz_tool.py (api 8) to 1.8.5 (api 9)
+  changes from: 1.7.37, 1.7.44, 1.7.53
+  must fix (fails on load or when that code runs):
+    line 70: is_ouya_build() and android_media_scan_file() were removed
