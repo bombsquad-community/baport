@@ -29,7 +29,9 @@ To:
 import argparse
 import ast
 from bisect import bisect_right
+import builtins
 import difflib
+from functools import lru_cache
 from pathlib import Path
 import re
 import sys
@@ -87,7 +89,7 @@ def add_import(content: str, statement: str) -> str:
         body = ast.parse(content).body
     except SyntaxError:
         # the api 7 port can leave hints that don't parse, so find the imports as text
-        future = [m.end() for m in re.finditer(r'^from[ \t]+__future__[ \t]+import[^\n]*\n?', content, flags=re.MULTILINE)]
+        future = [min(imp.end + 1, len(content)) for imp in from_imports(content, "__future__")]
         first = re.search(r'^(?:import|from)[ \t]+(?!__future__\b)\w', content, flags=re.MULTILINE)
         index = first.start() if first else 0
         return insert_at(content, max([index] + future[-1:]), statement)
@@ -213,9 +215,9 @@ def entry_local(entry: tuple[str, str]) -> str:
     return entry[0].split()[-1]
 
 
-def import_text(imp: FromImport, entries: list[tuple[str, str]], module: str | None = None) -> str:
-    """The statement imp with entries instead of its own (and module instead of its own)."""
-    head = f"{imp.indent}from {module or imp.module} import "
+def import_text(imp: FromImport, entries: list[tuple[str, str]]) -> str:
+    """The statement imp with entries instead of its own."""
+    head = f"{imp.indent}from {imp.module} import "
     comment = "".join("  " + c for c in imp.comments)
     if not imp.parens and not any(c for _, c in entries):
         return head + ", ".join(e for e, _ in entries) + comment
@@ -237,6 +239,13 @@ def replace_import(content: str, imp: FromImport, entries: list[tuple[str, str]]
 def imported_as(content: str, module: str, name: str) -> set[str]:
     """The local names `from module import name [as alias]` statements bind."""
     return {entry_local(e) for imp in from_imports(content, module) for e in imp.entries if entry_name(e) == name}
+
+
+def bare_names(names: set[str]) -> str | None:
+    """Regex for bare uses of names (`from x import name as alias` locals), not attributes or defs."""
+    if not names:
+        return None
+    return rf'(?<![\w.])(?<!def )(?:{"|".join(map(re.escape, sorted(names)))})'
 
 
 def drop_import_name(content: str, module: str, name: str) -> str:
@@ -278,10 +287,12 @@ def drop_removed_function(content: str, module: str, name: str) -> str:
     """
     # through any ba module name, also ones the api 7 port leaves unimported (_bui.x)
     forms = [rf'(?<![\w.])(?:_?ba\w*|_?bui|_?bs|{"|".join(map(re.escape, ba_aliases(content))) or "_?ba"})\.{name}\b']
-    local = imported_as(content, module, name) | imported_as(content, "_" + module, name)
-    for m in (module, "_" + module):
+    # api 7's _ba (now _babase) had all the native functions
+    modules = (module, "_" + module, "_babase")
+    local = set().union(*(imported_as(content, m, name) for m in modules))
+    for m in modules:
         content = drop_import_name(content, m, name)
-    forms += [rf'(?<![\w.])(?<!def ){re.escape(n)}\b' for n in sorted(local)]
+    forms += [rf'{bare}\b'] if (bare := bare_names(local)) else []
     for form in forms:
         content = replace_calls(content, rf'{form}\s*\(', lambda _, args: "None" if args is not None else None)
         # assigning to it only adds an attribute, so leave that alone
@@ -375,31 +386,34 @@ def fix_misplaced_names(content: str, plugin_type: str | None) -> str:
     (client: bauiv1), or without one whichever of them the plugin imports.
     Some also picked the wrong one of the two: bs.Widget is bui.Widget, and
     bui.X for a bascenev1-only name is bs.X. The party window is
-    app.classic.party_window, not app.ui_v1's.
+    app.classic.party_window, not app.ui_v1's, and local screenmessage()
+    calls lose the args only broadcastmessage() takes.
     """
     content = re.sub(r'\.app\.ui_v1\.party_window\b', ".app.classic.party_window", content)
     aliases = ba_aliases(content)
 
     def imports(module: str) -> bool:
-        return module in aliases.values() or bool(
-            re.search(rf'^\s*from {module} import', content, flags=re.MULTILINE)
-        )
+        return module in aliases.values() or bool(from_imports(content, module))
 
     if plugin_type:
         shared = "bauiv1" if plugin_type == "client" else "bascenev1"
     else:
         shared = "bauiv1" if imports("bauiv1") and not imports("bascenev1") else "bascenev1"
 
-    def home(source: str, name: str) -> str | None:
-        """The module name belongs in, when it isn't source's."""
+    def home(source: str, name: str, offset: int | None = None) -> str | None:
+        """The module name (used at offset) belongs in, when it isn't source's."""
         scene, ui = name in SCENE_ONLY_NAMES, name in UI_ONLY_NAMES
-        if source == "babase":
-            return shared if scene and ui else "bascenev1" if scene else "bauiv1" if ui else None
+        if source in ("babase", "_babase"):
+            if scene and ui:
+                # game code wants scene assets (a UI sound can't take a position)
+                return "bascenev1" if offset is not None and scope_of(content).in_game(offset) else shared
+            return "bascenev1" if scene else "bauiv1" if ui else None
         if source == "bascenev1":
             return "bauiv1" if ui and not scene else None
         return "bascenev1" if scene and not ui else None
 
-    for source in ("babase", "bascenev1", "bauiv1"):
+    # _babase too: api 7's _ba held what is now _bascenev1/_bauiv1, exported publicly
+    for source in ("babase", "_babase", "bascenev1", "bauiv1"):
         for name in sorted({entry_name(e) for imp in from_imports(content, source) for e in imp.entries}):
             if module := home(source, name):
                 content = move_from_imports(content, source, module, name)
@@ -409,11 +423,11 @@ def fix_misplaced_names(content: str, plugin_type: str | None) -> str:
             continue
         pattern = rf'(?<![\w.])(?:{names})\.(\w+)\b'
         targets = {}
-        for module in sorted({home(source, m.group(1)) for m in re.finditer(pattern, content)} - {None}):
+        for module in sorted({home(source, m.group(1), m.start()) for m in re.finditer(pattern, content)} - {None}):
             content, targets[module] = module_alias(content, module)
 
         def fix(match: re.Match) -> str:
-            module = home(source, match.group(1))
+            module = home(source, match.group(1), match.start())
             if not module:
                 return match.group(0)
             # ba_meta lines need the full module name, not an alias
@@ -422,7 +436,32 @@ def fix_misplaced_names(content: str, plugin_type: str | None) -> str:
             return f"{prefix}.{match.group(1)}"
 
         content = re.sub(pattern, fix, content)
-    return content
+    return local_screenmessage_args(content)
+
+
+def local_screenmessage_args(content: str) -> str:
+    """Drops the args only bascenev1.broadcastmessage() takes from local screenmessage() calls.
+
+    babase/bauiv1.screenmessage() only shows on this device and takes
+    message, color, log and literal; top, image, clients and transient were
+    api 7's ba.screenmessage() args for messages sent to the clients too.
+    """
+    local = module_aliases(content, "babase", "_babase", "bauiv1")
+    names = [rf'(?<![\w.])(?:{local})\.screenmessage'] if local else []
+    if bare := bare_names(set().union(*(imported_as(content, m, "screenmessage") for m in ("babase", "bauiv1")))):
+        names.append(bare)
+    if not names:
+        return content
+
+    def call(match: re.Match, args: list[str] | None) -> str | None:
+        if args is None:
+            return None
+        kept = [a.strip() for a in args if not re.match(r'\s*(top|image|clients|transient)\s*=', a)]
+        if len(kept) == len(args):
+            return None
+        return f"{match.group(0)}{', '.join(kept)})"
+
+    return replace_calls(content, rf'(?:{"|".join(names)})\s*\(', call)
 
 
 class Change(NamedTuple):
@@ -573,7 +612,10 @@ class Api8:
         content = content.replace("from _ba import", "from _babase import")
         content = re.sub(r'\bimport _ba\b', "import _babase", content)
         content = re.sub(
-            r'\bimport ba(\b|\.(\w+))', "import babase\nimport bauiv1\nimport bascenev1", content
+            r'^([ \t]*)import ba\b(?![.\w])',
+            lambda m: "\n".join(f"{m.group(1)}import {name}" for name in ("babase", "bauiv1", "bascenev1")),
+            content,
+            flags=re.MULTILINE,
         )
         content = content.replace("babase.app.ui", "bauiv1.app.ui_v1")
 
@@ -587,20 +629,10 @@ class Api8:
         if plugin_type == "client":
             content = content.replace("_babase.screenmessage", "bauiv1.screenmessage")
             content = content.replace("babase.screenmessage", "bauiv1.screenmessage")
-            content = content.replace("babase.getsound", "bauiv1.getsound")
-            content = content.replace("_babase.gettexture", "bauiv1.gettexture")
-            content = content.replace("babase.gettexture", "bauiv1.gettexture")
-            content = content.replace("babase.getmesh", "bauiv1.getmesh")
-            content = content.replace("babase.getcollisionmesh", "bauiv1.getcollisionmesh")
         else:
             ## For transmission:
             content = content.replace("_babase.screenmessage", "bascenev1.broadcastmessage")
             content = content.replace("babase.screenmessage", "bascenev1.broadcastmessage")
-            content = content.replace("babase.getsound", "bascenev1.getsound")
-            content = content.replace("_babase.gettexture", "bascenev1.gettexture")
-            content = content.replace("babase.gettexture", "bascenev1.gettexture")
-            content = content.replace("babase.getmesh", "bascenev1.getmesh")
-            content = content.replace("babase.getcollisionmesh", "bascenev1.getcollisionmesh")
         ###################################################################################
         content = content.replace("babase.getcollidemesh", "bascenev1.getcollisionmesh")
         content = content.replace("collide_mesh", "collision_mesh")
@@ -656,9 +688,12 @@ class Api8:
         content = content.replace(
             "babase.app.stress_test_reset_timer", "_babase.app.classic.stress_test_reset_timer"
         )
-        content = content.replace("babase._map", "bascenev1._map")
-        content = content.replace("babase._session.", "bascenev1._session.")
-        content = content.replace("babase._activity", "bascenev1._activity")
+        # api 7's ba held the scene's private modules, as `ba._x` or `from ba import _x`
+        content = re.sub(rf'\bbabase\.({"|".join(SCENE_PRIVATE_MODULES)})\b', r'bascenev1.\1', content)
+        for module in {entry_name(e) for imp in from_imports(content, "babase") for e in imp.entries} & set(
+            SCENE_PRIVATE_MODULES
+        ):
+            content = move_from_imports(content, "babase", "bascenev1", module)
         content = content.replace(
             "_babase.get_client_public_device_uuid", "_bascenev1.get_client_public_device_uuid"
         )
@@ -666,20 +701,11 @@ class Api8:
         content = content.replace("babase.PowerupMessage", "bascenev1.PowerupMessage")
         content = content.replace("babase.FreezeMessage", "bascenev1.FreezeMessage")
         content = context_refs(content)
-        content = content.replace("babase._dualteamsession", "bascenev1._dualteamsession")
-        content = content.replace("babase._freeforallsession", "bascenev1._freeforallsession")
-        content = content.replace("babase._multiteamsession", "bascenev1._multiteamsession")
-        content = content.replace("babase._gameactivity", "bascenev1._gameactivity")
-        content = content.replace("babase._powerup", "bascenev1._powerup")
         content = content.replace("babase.Chooser", "bascenev1.Chooser")
-        content = content.replace("babase._lobby", "bascenev1._lobby")
-        content = content.replace("babase._stats", "bascenev1._stats")
-        content = content.replace("babase._team", "bascenev1._team")
         content = content.replace("PlayerType", "PlayerT")
         content = content.replace(
             "babase.app.spaz_appearances", "babase.app.classic.spaz_appearances"
         )
-        content = content.replace("babase._coopsession", "bascenev1._coopsession")
         content = content.replace("babase._servermode", "baclassic._servermode")
         content = content.replace("_babase.app.server", "babase.app.classic.server")
         content = content.replace("_babase.chatmessage", "bascenev1.chatmessage")
@@ -689,18 +715,8 @@ class Api8:
             "_babase.get_public_party_max_size", "bascenev1.get_public_party_max_size"
         )
         content = content.replace("_babase.new_host_session", "bascenev1.new_host_session")
-        content = content.replace("babase._playlist", "bascenev1._playlist")
         content = content.replace("model", "mesh")
-        # Real time timers are app timers now, sim/base time is the default
-        content = re.sub(
-            r'\bbascenev1\.Timer\(((?:[^()]|\([^()]*\))*?)\s*,\s*timetype\s*=\s*babase\.TimeType\.REAL\s*\)',
-            r'babase.AppTimer(\1)',
-            content,
-        )
-        content = re.sub(r'\s*,\s*timetype\s*=\s*babase\.TimeType\.(SIM|BASE)\b', '', content)
-        content = content.replace(
-            "TimeType.REAL", "use `bascenev1.apptimer` in `activity.context` instead"
-        )
+        content = drop_timetypes(content)
         content = content.replace(
             "_babase.app.coop_session_args", "babase.app.classic.coop_session_args"
         )
@@ -739,34 +755,7 @@ class Api8:
 
         content = content.replace(".app.platform", ".app.classic.platform")
         content = content.replace(".app.subplatform", ".app.classic.subplatform")
-        # Converting `ba.playsound(abc)` to `abc.play()` is tricky.
-        # Do it manually in case regex substitution fails.# Do it manually in case regex substitution fails. Are you sure!!
-        #! FIXME May cause syntax warning on 3.12 with this code below
-        content = re.sub(
-            r'babase\.playsound\(([^,\n]+)(,\s*([^,\n]+))?(,\s*position=([^,\n]+))?\)',
-            r'\1.play(\3\5)',
-            content,
-            flags=re.MULTILINE,
-        )
-        # content = re.sub(
-        #     r'babase\.playsound\(\s*([^,\n]+),\s*([^,\n]+)\)',
-        #     r'\1.play(\2)',
-        #     content,
-        #     flags=re.MULTILINE
-        # )
-        # content = re.sub(
-        #     r'babase\.playsound\(\s*([^,\n]+),\s*([^,\n]+),\s*position=([^,\n]+)\)',
-        #     r'\1.play(\2, position=\3)',
-        #     content,
-        #     flags=re.MULTILINE
-        # )
-        # content = re.sub("babase\.playsound\((.+?), (.+?), (.+?)\)", "\\1.play(\\2, \\3)", content)
-        # content = re.sub(
-        #     r'babase\.playsound\(([^,\n]+),\s*position=([^,\n]+)\)',
-        #     r'\1.play(position=\2)',
-        #     content
-        # )
-        # content = re.sub("babase\.playsound\((.*)\)", "\\1.play()", content)
+        content = playsound_calls(content)
 
         # Removed in API 8:
         # content = content.replace("babase.internal.set_telnet_access_enabled", "")
@@ -1183,7 +1172,6 @@ class Api8:
         content = content.replace("babase.getcollidemesh", "bascenev1.getcollisionmesh")
         content = content.replace("collide_mesh", "collision_mesh")
         content = content.replace("babase.FloatSetting", "bascenev1.FloatSetting")
-        content = content.replace("babase.playsound", "bascenev1.playsound")
         content = content.replace(
             "bascenev1.time(timeformat=babase.TimeFormat.MILLISECONDS)", "bascenev1.time() * 1000"
         )
@@ -1191,10 +1179,11 @@ class Api8:
         # get_connection_to_host_info() still returns a dict, its _2 variant returns HostInfo | None
         # which would break the dict style code written against it, so leave it alone.
 
+        # ba._store's functions are app.classic.store methods now, not a module to import
+        content = drop_module_import(content, "babase._store")
         content = content.replace("babase._store", "bauiv1.app.classic.store")
         content = content.replace("bastd.ui", "bauiv1lib")
         content = content.replace("bastd", "bascenev1lib")
-        content = content.replace("timetype=", "")
         content = content.replace("babase.columnwidget", "bauiv1.columnwidget")
         content = content.replace("_babase.get_game_port", "bascenev1.get_game_port")
         content = content.replace("_babase.get_chat_messages", "bascenev1.get_chat_messages")
@@ -1209,14 +1198,14 @@ class Api8:
         )
         content = content.replace("bascenev1", "bs")
         content = content.replace("bauiv1", "bui")
-        content = content.replace("import bs", "import bascenev1 as bs")
-        content = content.replace("import bui", "import bauiv1 as bui")
+        full = {"bs": "bascenev1", "bui": "bauiv1"}
+        # `import ba` takes the alias, `import ba._map` and `from ba import x` the module
+        content = re.sub(
+            r'(?<![\w.])import (bs|bui)\b(?!\.)', lambda m: f"import {full[m.group(1)]} as {m.group(1)}", content
+        )
+        content = re.sub(r'\b(import|from) (bs|bui)(?=\.|\s+import\b)', lambda m: f"{m.group(1)} {full[m.group(2)]}", content)
         content = content.replace("bslib", "bascenev1lib")
         content = content.replace("builib", "bauiv1lib")
-        content = content.replace("from bs.", "from bascenev1.")
-        content = content.replace("from bui.", "from bauiv1.")
-        content = content.replace("import bascenev1 as bascenev1lib", "import bascenev1lib")
-        content = content.replace("import bauiv1 as bauiv1lib", "import bauiv1lib")
         content = re.sub(
             r'^(\s*#\s*ba_meta export) bs\.GameActivity\b',
             r'\1 bascenev1.GameActivity',
@@ -1224,6 +1213,8 @@ class Api8:
             flags=re.MULTILINE,
         )
         content = content.replace("_bs", "bs")
+        # ba.internal's names all moved; the import goes once nothing uses it
+        content = drop_module_import(content, "babase.internal", unless_used=True)
 
         return content
 
@@ -1431,16 +1422,17 @@ class Api9:
     def v1_7_37(content: str) -> str:
         """efro.log, tpartial, enum_by_value, party icon, ui_scale, UIV1Subsystem, threadpool changes."""
         content = re.sub(r'\befro\.log\b', "efro.logging", content)
-        for local in sorted(imported_as(content, "efro.call", "tpartial")):
-            content = drop_import_name(content, "efro.call", "tpartial")
-            content = add_import(content, f"from functools import partial as {local}")
+        local = imported_as(content, "efro.call", "tpartial")
+        content = drop_import_name(content, "efro.call", "tpartial")
+        for name in sorted(local):
+            content = add_import(content, f"from functools import partial as {name}")
         if "efro.call.tpartial" in content:
             content = content.replace("efro.call.tpartial", "functools.partial")
             content = ensure_import(content, "functools")
         # enum_by_value(MyEnum, foo) is just MyEnum(foo)
         local = imported_as(content, "efro.util", "enum_by_value")
         content = drop_import_name(content, "efro.util", "enum_by_value")
-        names = "|".join([r'\b(?:[\w.]+\.)?enum_by_value'] + [rf'(?<![\w.]){re.escape(n)}' for n in sorted(local)])
+        names = "|".join(filter(None, [r'\b(?:[\w.]+\.)?enum_by_value', bare_names(local)]))
         content = re.sub(rf'(?:{names})\(\s*([\w.]+)\s*,\s*', r'\1(', content)
         # the party icon is always visible now
         content = replace_calls(
@@ -1449,6 +1441,7 @@ class Api9:
         content = drop_removed_function(content, "bauiv1", "set_party_icon_always_visible")
         content = re.sub(r'\b(\w+)\.env\(\)\[["\']ui_scale["\']\]', r'\1.get_ui_scale()', content)
         content = re.sub(r'\bUIV1Subsystem\b', "UIV1AppSubsystem", content)
+        content = keyword_only_args(content)
         return re.sub(r'\.threadpool_submit_no_wait\(', ".threadpool.submit_no_wait(", content)
 
     @change("1.7.37", needs_type=True)
@@ -1521,8 +1514,8 @@ class Api9:
             for module in modules:
                 content = drop_import_name(content, module, f"print_{kind}")
             pattern = rf'\b(?:{aliases})\.print_{kind}'
-            if local:
-                pattern = rf'(?:{pattern}|(?<![\w.])(?<!def )(?:{"|".join(map(re.escape, sorted(local)))}))'
+            if bare := bare_names(local):
+                pattern = rf'(?:{pattern}|{bare})'
             if re.search(rf'{pattern}\(', content):
                 content = print_to_logging(content, rf'{pattern}\(', kind)
                 used = True
@@ -1724,6 +1717,7 @@ class Api9:
         core = module_aliases(content, "babase", "bauiv1", "bascenev1")
         if core:
             content = re.sub(rf'\b({core})\.(WeakCall|Call)\b', r'\1.\2Partial', content)
+        content = party_window_open_states(content)
         return drop_removed_function(content, "bauiv1", "set_party_window_open")
 
     @change(
@@ -1786,22 +1780,40 @@ class Api9:
 
     @change("1.8.0")
     def v1_8_0(content: str) -> str:
-        """charstr(SpecialChar.X) is SpecialChar.X.value, textwidget on_return_press_call is on_submit_call."""
+        """charstr(SpecialChar.X) is SpecialChar.X.value, textwidget on_return_press_call is on_submit_call, Actor._activity is gone."""
+        # also through import aliases (`from bauiv1 import charstr as cs, SpecialChar as sc`)
+        modules = ("babase", "_babase", "babase._text", "bauiv1", "bascenev1")
+
+        def through_aliases(pattern: str, name: str) -> str:
+            bare = bare_names({n for m in modules for n in imported_as(content, m, name) if n != name})
+            return f"{pattern}|{bare}" if bare else pattern
+
+        charstr = through_aliases(r'\b(?:\w+\.)?charstr', "charstr")
+        special = through_aliases(r'[\w.]*SpecialChar', "SpecialChar")
+        content = re.sub(rf'(?:{charstr})\(\s*((?:{special})\.\w+)\s*\)', r'\1.value', content)
         content = re.sub(
-            r'\b(?:\w+\.)?charstr\(\s*([\w.]*SpecialChar\.\w+)\s*\)', r'\1.value', content
-        )
-        content = re.sub(
-            r'\b(?:\w+\.)?charstr\(\s*(getattr\(\s*[\w.]*SpecialChar\s*,(?:[^()]|\([^()]*\))*\))\s*\)',
+            rf'(?:{charstr})\(\s*(getattr\(\s*(?:{special})\s*,(?:[^()]|\([^()]*\))*\))\s*\)',
             r'\1.value',
             content,
         )
         # drop the import once nothing calls it by the name it binds
-        for module in ("babase", "bauiv1", "bascenev1"):
+        for module in modules:
             local = imported_as(content, module, "charstr")
             if local and not any(re.search(rf'(?<![\w.]){re.escape(n)}\(', content) for n in local):
                 content = drop_import_name(content, module, "charstr")
         content = re.sub(r'\bon_return_press_call\s*=', "on_submit_call=", content)
-        return re.sub(r'\binvoke_return_press\s*=', "invoke_submit=", content)
+        content = re.sub(r'\binvoke_return_press\s*=', "invoke_submit=", content)
+        # the game passes langstr=True to these now (and wants a LangStr back then)
+        content = re.sub(
+            r'(\bdef (?:get_instance_display_string|get_instance_scoreboard_display_string'
+            r'|get_display_string|get_team_display_string)\s*\()([^)]*?)(\s*,?\s*\))',
+            lambda m: m.group(0)
+            if re.search(r'\blangstr\b|\*\*', m.group(2))
+            else f"{m.group(1)}{m.group(2)}, {'' if re.search(r'(^|,)\s*\*', m.group(2)) else '*, '}langstr: bool = False"
+            + m.group(3),
+            content,
+        )
+        return actor_activity_refs(content)
 
     @change(
         "1.8.0",
@@ -1942,6 +1954,14 @@ def reference(content: str, dotted: str) -> tuple[str, str]:
     return ensure_import(content, dotted.split(".")[0]), dotted
 
 
+def drop_module_import(content: str, module: str, unless_used: bool = False) -> str:
+    """Removes `import module` lines (unless_used: only when nothing else mentions module)."""
+    line = rf'^[ \t]*import {re.escape(module)}[ \t]*(#[^\n]*)?\n'
+    if unless_used and re.search(rf'\b{re.escape(module)}\b', re.sub(line, "", content, flags=re.MULTILINE)):
+        return content
+    return re.sub(line, "", content, flags=re.MULTILINE)
+
+
 def move_from_imports(content: str, old_module: str, new_module: str, name: str) -> str:
     """Moves name out of `from old_module import ...` into its own `from new_module import`."""
     for imp in reversed(from_imports(content, old_module)):
@@ -1987,6 +2007,7 @@ def private_removals(content: str, target: tuple[int, ...]) -> list[str]:
         for dotted in step.restored:
             gone.pop(dotted, None)
     words = set(re.findall(r'\w+', content))
+    starts = line_starts(content)
     notes = []
     for dotted, version in gone.items():
         module, name = dotted.rsplit(".", 1)
@@ -1994,7 +2015,7 @@ def private_removals(content: str, target: tuple[int, ...]) -> list[str]:
             continue
         patterns = [pattern] if (pattern := name_pattern(aliases, dotted)) else []
         imported = {
-            content.count("\n", 0, imp.start) + 1
+            line_number(starts, imp.start)
             for imp in from_imports(content, module)
             if any(entry_name(e) == name for e in imp.entries)
         }
@@ -2011,10 +2032,18 @@ MANUAL_FIXES = [
         "ContextRef() takes no arguments, use activity.context / session.context or ContextRef.empty()",
     ),
     (
-        r'use `bascenev1\.apptimer`',
+        r'\btimetype\s*=',
         (1, 7, 20),
-        "real time timer baport couldn't convert, use babase.AppTimer or bascenev1.apptimer",
+        "timers take no timetype: sim/base time is the default, real time is babase.AppTimer/apptimer",
     ),
+    (
+        r'\b_?ba(base)?\.internal\b',
+        (1, 7, 20),
+        "ba.internal is gone, its names moved to babase/bascenev1/bauiv1 or app.classic/app.plus",
+    ),
+    (r'\bSpecialChar\.ALIBABA_LOGO\b', (1, 7, 22), "SpecialChar.ALIBABA_LOGO was removed"),
+    (r'\bSpecialChar\.OUYA_LOGO\b', (1, 7, 36), "SpecialChar.OUYA_LOGO was removed"),
+    (r'\bSpecialChar\.GAME_CIRCLE_LOGO\b', (1, 7, 62), "SpecialChar.GAME_CIRCLE_LOGO was removed"),
     (
         r'timeformat\s*=|TimeFormat\.',
         (1, 7, 20),
@@ -2162,7 +2191,12 @@ MANUAL_FIXES = [
         (1, 8, 0),
         "the engine's asset wrapper modules are private now, bundle your own",
     ),
-    (r'\bcharstr\(', (1, 8, 0), "charstr() is deprecated, use SpecialChar.X.value"),
+    (r'\bcharstr\b', (1, 8, 0), "charstr() is deprecated, use SpecialChar.X.value"),
+    (
+        r'\bDependencySet\b|\bdepsets\b',
+        (1, 8, 0),
+        "dependency sets are gone, Session() takes no depsets and activities declare no dependencies",
+    ),
     (
         r'\bgetsimplesound\(',
         (1, 8, 0),
@@ -2174,7 +2208,20 @@ MANUAL_FIXES = [
         "deprecated, use get_preview_texture() / preview_texture= with an asset-package wrapper",
     ),
     (r'\bclipboard_get_text\(', (1, 8, 0), "deprecated, use clipboard_get_text_async(callback)"),
+    (
+        r'\.get_media\(|\bspaz_media\b',
+        (1, 8, 1),
+        "builtin characters are packaged spaz defs now, so their media parts are empty:"
+        " restyle a spaz with SpazFactory.get_look_attrs(character)",
+    ),
     (r'\bLstr\(', (1, 8, 0), "Lstr is going away when api 9 ends, migrate to LangStr"),
+    (
+        r'\bdef (get_instance_display_string|get_instance_scoreboard_display_string'
+        r'|get_display_string|get_team_display_string)\(',
+        (1, 8, 0),
+        "the game calls this with langstr=True and wants a babase.LangStr then"
+        " (LangStr.from_text(...)), the Lstr only without it",
+    ),
     (
         r'\bget_button_name\(',
         (1, 8, 0),
@@ -2210,12 +2257,68 @@ def manual_fixes(content: str, target: tuple[int, ...]) -> list[str]:
         if scene and re.search(timers, content):
             in_game = game_class_lines(content)
             lines = ["" if n in in_game else line for n, line in enumerate(lines, 1)]
-        if scene and (shown := hit_lines(lines, [timers])):
-            notes.append(
-                f"line {shown}: game timers only work inside a game, for menu/ui/chat code "
-                "use --app-timers (a repeating bs.timer() needs a babase.AppTimer kept in a variable, by hand)"
-            )
+            if shown := hit_lines(lines, [timers]):
+                notes.append(
+                    f"line {shown}: game timers only work inside a game, for menu/ui/chat code "
+                    "use --app-timers (a repeating bs.timer() needs a babase.AppTimer kept in a variable, by hand)"
+                )
+    for name, numbers in undefined_names(content).items():
+        shown = ", ".join(map(str, numbers[:10])) + (", ..." if len(numbers) > 10 else "")
+        notes.append(f"line {shown}: {name} is used but never defined or imported")
     return notes
+
+
+def undefined_names(content: str) -> dict[str, list[int]]:
+    """Names content reads but never binds anywhere, nor are builtins: {name: line numbers}.
+
+    One flat set for the whole file, so it only finds names missing
+    everywhere (often a module or class an old port left behind, like a bare
+    _ba). Annotations are skipped, and so are files with a star import.
+    """
+    try:
+        tree = ast.parse(content)
+    except SyntaxError:
+        return {}
+    bound = set(dir(builtins)) | {"__file__", "__name__", "__doc__", "__spec__", "__loader__", "__package__", "__path__"}
+    annotations = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and any(a.name == "*" for a in node.names):
+            return {}
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            bound |= {(a.asname or a.name).split(".")[0] for a in node.names}
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            bound.add(node.name)
+        elif isinstance(node, ast.Name) and not isinstance(node.ctx, ast.Load):
+            bound.add(node.id)
+        elif isinstance(node, ast.arg):
+            bound.add(node.arg)
+        elif isinstance(node, (ast.Global, ast.Nonlocal)):
+            bound |= set(node.names)
+        elif isinstance(node, ast.ExceptHandler) and node.name:
+            bound.add(node.name)
+        elif isinstance(node, (ast.MatchAs, ast.MatchStar)) and node.name:
+            bound.add(node.name)
+        for annotation in (
+            getattr(node, "annotation", None) if isinstance(node, (ast.arg, ast.AnnAssign)) else None,
+            getattr(node, "returns", None),
+        ):
+            if annotation is not None:
+                annotations |= {id(n) for n in ast.walk(annotation)}
+    missing: dict[str, set[int]] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load) and node.id not in bound:
+            if id(node) not in annotations:
+                missing.setdefault(node.id, set()).add(node.lineno)
+    return {name: sorted(lines) for name, lines in sorted(missing.items())}
+
+
+@lru_cache(maxsize=4)
+def parse(content: str) -> ast.Module | None:
+    """ast.parse(content), or None if it doesn't parse. Cached, so callers must not edit the tree."""
+    try:
+        return ast.parse(content)
+    except SyntaxError:
+        return None
 
 
 def is_game(content: str) -> bool:
@@ -2227,24 +2330,287 @@ def is_game(content: str) -> bool:
     )
 
 
-GAME_BASE = r'(?<![\w.])(?:\w+\.)*(\w*(Activity|Game|Actor|Session)|Map|\w*Spaz\w*)\b'
+def scene_classes(content: str) -> dict[str, tuple[str, int, int]]:
+    """Top level classes of game code: {name: ("actor" or "game", first line, last line)}.
+
+    A class is game code when one of its bases is named like an activity,
+    game, session, map, actor or bot, comes from bascenev1lib.actor/.game (or
+    api 7's bastd), or is such a class in the same file. "game" is for
+    activities, games, sessions and maps, "actor" for everything else.
+    """
+    tree = parse(content)
+    if tree is None:
+        return {}
+    library = re.compile(r'(?:bascenev1lib|bastd)\.(?:actor|game)\b')
+    # names bound to bascenev1lib.actor/.game modules or their classes
+    imported = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and library.match(node.module or ""):
+            imported |= {a.asname or a.name for a in node.names}
+        elif isinstance(node, ast.Import):
+            imported |= {a.asname for a in node.names if a.asname and library.match(a.name)}
+    classes: dict[str, tuple[str, int, int]] = {}
+    pending = [n for n in tree.body if isinstance(n, ast.ClassDef)]
+    while True:
+        found = False
+        for node in list(pending):
+            for base in node.bases:
+                text = re.sub(r'\[.*', "", ast.unparse(base))
+                root, last = text.split(".")[0], text.split(".")[-1]
+                game = bool(re.fullmatch(r'\w*(Activity|Game|Session|Map)', last))
+                if root in classes:
+                    kind = classes[root][0]
+                elif game:
+                    kind = "game"
+                elif library.match(text) or root in imported or re.search(r'Actor|Spaz', last):
+                    kind = "actor"
+                else:
+                    continue
+                classes[node.name] = (kind, node.lineno, node.end_lineno)
+                pending.remove(node)
+                found = True
+                break
+        if not found:
+            return classes
+
+
+def actor_activity_refs(content: str) -> str:
+    """Rewrites self._activity() to self.getactivity(doraise=False) in actor subclasses.
+
+    Actor kept a private weakref to its activity as self._activity until
+    1.8.0, which made it self._host (actors can live in a LocalDisplay now).
+    getactivity(doraise=False) is the same: None once the activity is gone.
+    Classes that set self._activity themselves keep it.
+    """
+    lines = content.split("\n")
+    for kind, first, last in scene_classes(content).values():
+        body = "\n".join(lines[first - 1 : last])
+        if kind == "actor" and not re.search(r'\bself\._activity\s*=[^=]', body):
+            body = re.sub(r'\bself\._activity\(\s*\)', "self.getactivity(doraise=False)", body)
+            lines[first - 1 : last] = body.split("\n")
+    return "\n".join(lines)
+
+
+# Constructors that became keyword-only in 1.7.37: (module, class) ->
+# (positional args still allowed, parameter order in 1.7.36)
+KEYWORD_ONLY_INITS = {
+    ("bascenev1lib.actor.spaz", "Spaz"): (
+        0, "color highlight character source_player start_invincible can_accept_powerups powerups_expire demo_mode"
+    ),
+    ("bascenev1lib.actor.bomb", "Bomb"): (0, "position velocity bomb_type blast_radius bomb_scale source_player owner"),
+    ("bascenev1lib.actor.bomb", "Blast"): (
+        0, "position velocity blast_radius blast_type source_player hit_type hit_subtype"
+    ),
+    ("bascenev1lib.actor.flag", "Flag"): (0, "position color materials touchable dropped_timeout"),
+    ("bascenev1lib.actor.spawner", "Spawner"): (0, "data pt spawn_time send_spawn_message spawn_callback"),
+    ("bascenev1lib.actor.controlsguide", "ControlsGuide"): (0, "position scale delay lifespan bright"),
+    ("bascenev1", "HitMessage"): (
+        0,
+        "srcnode pos velocity magnitude velocity_magnitude radius source_player kick_back flat_damage hit_type"
+        " force_direction hit_subtype",
+    ),
+    ("bascenev1", "Session"): (1, "depsets team_names team_colors min_players max_players submit_score"),
+    ("bascenev1lib.game.capturetheflag", "Team"): (
+        0,
+        "base_pos base_region_material base_region spaz_material_no_flag_physical spaz_material_no_flag_collide"
+        " flagmaterial",
+    ),
+    ("bascenev1lib.actor.playerspaz", "PlayerSpaz"): (1, "player color highlight character powerups_expire"),
+    ("bascenev1lib.actor.popuptext", "PopupText"): (1, "text position color random_offset offset scale"),
+    ("bascenev1lib.actor.text", "Text"): (
+        1,
+        "text position h_align v_align color transition transition_delay flash v_attach h_attach scale"
+        " transition_out_delay maxwidth shadow flatness vr_depth host_only front",
+    ),
+    ("bascenev1lib.actor.image", "Image"): (
+        1,
+        "texture position transition transition_delay attach color scale transition_out_delay mesh_opaque"
+        " mesh_transparent vr_depth host_only front",
+    ),
+    ("bascenev1lib.actor.zoomtext", "ZoomText"): (
+        2,
+        "text position shiftposition shiftdelay lifespan flash trail h_align color jitter trailcolor scale"
+        " project_scale tilt_translate maxwidth",
+    ),
+    ("bascenev1lib.game.elimination", "Icon"): (
+        3, "player position scale show_lives show_death name_scale name_maxwidth flatness shadow"
+    ),
+    ("bascenev1", "Level"): (4, "name gametype settings preview_texture_name displayname"),
+    ("baclassic", "Achievement"): (4, "name icon icon_color level_name award hard_mode_only"),
+}
+
+
+def keyword_only_args(content: str) -> str:
+    """Passes the args past KEYWORD_ONLY_INITS' positional limit by name.
+
+    Covers calls to the classes (through imports, module aliases or local
+    subclasses without their own __init__), super().__init__(...) in their
+    subclasses and Base.__init__(self, ...). Calls with *args are left alone.
+    """
+    try:
+        tree = ast.parse(content)
+    except SyntaxError:
+        return content
+    modules = {module for module, _ in KEYWORD_ONLY_INITS}
+    classes, aliases = {}, {}  # local name -> spec, local name -> module
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module:
+            for a in node.names:
+                if (node.module, a.name) in KEYWORD_ONLY_INITS:
+                    classes[a.asname or a.name] = KEYWORD_ONLY_INITS[(node.module, a.name)]
+                elif f"{node.module}.{a.name}" in modules:
+                    aliases[a.asname or a.name] = f"{node.module}.{a.name}"
+        elif isinstance(node, ast.Import):
+            aliases.update({a.asname: a.name for a in node.names if a.asname and a.name in modules})
+
+    def spec_of(expr: ast.expr) -> tuple[int, str] | None:
+        if isinstance(expr, ast.Name):
+            return classes.get(expr.id)
+        if isinstance(expr, ast.Attribute):
+            module = ast.unparse(expr.value)
+            return KEYWORD_ONLY_INITS.get((aliases.get(module, module), expr.attr))
+        return None
+
+    # local subclasses: calling one without its own __init__ calls the base's
+    top_classes = [n for n in tree.body if isinstance(n, ast.ClassDef)]
+    bases = {}
+    for node in top_classes:
+        base = next((spec for b in node.bases if (spec := spec_of(b))), None)
+        if base is None:
+            continue
+        bases[node.name] = base
+        own_init = any(isinstance(f, ast.FunctionDef) and f.name == "__init__" for f in node.body)
+        classes.pop(node.name, None)
+        if not own_init:
+            classes[node.name] = base
+    edits = []
+    starts = line_starts(content)
+    lines = content.split("\n")
+
+    def offset(lineno: int, col: int) -> int:
+        # ast columns count utf-8 bytes
+        return starts[lineno - 1] + len(lines[lineno - 1].encode()[:col].decode(errors="ignore"))
+
+    def convert(call: ast.Call, spec: tuple[int, str], skip: int) -> None:
+        allowed, order = spec[0], spec[1].split()
+        args = call.args[skip:]
+        extra = args[allowed:]
+        given = {k.arg for k in call.keywords}
+        if not extra or any(isinstance(a, ast.Starred) for a in args) or len(args) > len(order):
+            return
+        if given & set(order[allowed : len(args)]):
+            return
+        previous = call.args[skip + allowed - 1] if skip + allowed else call.func
+        for name, arg in zip(order[allowed:], extra):
+            # the separator before the arg: the call's paren or the comma after the previous arg
+            start = offset(previous.end_lineno, previous.end_col_offset)
+            separator = content.index("(" if previous is call.func else ",", start)
+            # the arg may sit in parens of its own, `name=` goes before them
+            position = cursor = offset(arg.lineno, arg.col_offset)
+            while cursor - 1 > separator and content[cursor - 1] in " \t\n(":
+                cursor -= 1
+                if content[cursor] == "(":
+                    position = cursor
+            edits.append((position, f"{name}="))
+            previous = arg
+
+    for cls in top_classes:
+        for node in ast.walk(cls):
+            if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "__init__"):
+                continue
+            value = node.func.value
+            if isinstance(value, ast.Call) and getattr(value.func, "id", None) == "super" and cls.name in bases:
+                convert(node, bases[cls.name], 0)
+            elif spec := spec_of(value):
+                convert(node, spec, 1)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and (spec := spec_of(node.func)):
+            convert(node, spec, 0)
+    for position, text in sorted(set(edits), reverse=True):
+        content = content[:position] + text + content[position:]
+    return content
+
+
+def party_window_open_states(content: str) -> str:
+    """Rewrites set_party_window_open(True/False) statements in methods to a UIOpenState.
+
+    The engine hands chat messages to the party window only while a
+    UIOpenState('classicparty') is held (bauiv1lib.party.PartyWindow keeps
+    one as self._uiopenstate), so a custom party window holds one while open.
+    """
+    if "set_party_window_open" not in content:
+        return content
+    try:
+        tree = ast.parse(content)
+    except SyntaxError:
+        return content
+    statements = {}
+    for cls in [n for n in ast.walk(tree) if isinstance(n, ast.ClassDef)]:
+        for method in [n for n in cls.body if isinstance(n, ast.FunctionDef)]:
+            if not method.args.args or method.args.args[0].arg != "self":
+                continue
+            for node in ast.walk(method):
+                call = node.value if isinstance(node, ast.Expr) else None
+                func = getattr(call, "func", None)
+                if (
+                    isinstance(call, ast.Call)
+                    and (getattr(func, "attr", None) or getattr(func, "id", None)) == "set_party_window_open"
+                    and len(call.args) == 1
+                    and not call.keywords
+                    and isinstance(call.args[0], ast.Constant)
+                    and isinstance(call.args[0].value, bool)
+                    and node.lineno == node.end_lineno
+                ):
+                    statements[node.lineno] = call.args[0].value
+    if not statements:
+        return content
+    lines = content.split("\n")
+    for number, opened in statements.items():
+        indent = re.match(r'[ \t]*', lines[number - 1]).group(0)
+        comment = re.search(r'\s*#.*$', lines[number - 1])
+        state = "bui.UIOpenState('classicparty')" if opened else "None"
+        lines[number - 1] = f"{indent}self._uiopenstate = {state}{comment.group(0) if comment else ''}"
+    content = "\n".join(lines)
+    if "bui.UIOpenState" in content:
+        content, alias = module_alias(content, "bauiv1")
+        content = content.replace("bui.UIOpenState('classicparty')", f"{alias}.UIOpenState('classicparty')")
+    return content
+
+
+class Scope:
+    """Where content's game code is: the whole file when it exports a game or map,
+    else scene_classes() and top level functions that make nodes.
+
+    Use scope_of() to share one per content.
+    """
+
+    def __init__(self, content: str):
+        self.starts = line_starts(content)
+        if is_game(content):
+            self.lines = None
+            return
+        self.lines = game_class_lines(content)
+        tree = parse(content)
+        for node in tree.body if tree else []:
+            if isinstance(node, ast.FunctionDef) and any(
+                getattr(getattr(n, "func", None), "attr", None) == "newnode" for n in ast.walk(node)
+            ):
+                self.lines.update(range(node.lineno, node.end_lineno + 1))
+
+    def in_game(self, offset: int) -> bool:
+        return self.lines is None or line_number(self.starts, offset) in self.lines
+
+
+scope_of = lru_cache(maxsize=4)(Scope)
 
 
 def game_class_lines(content: str) -> set[int]:
-    """Line numbers inside top level classes deriving from an activity, game, session, map, actor or bot.
+    """Line numbers inside scene_classes(), where game timers are right.
 
-    Game timers are right there even when the file only exports a Plugin
-    (plugins that register or patch games, or add bots).
+    That holds even when the file only exports a Plugin (plugins that
+    register or patch games, or add bots).
     """
-    try:
-        body = ast.parse(content).body
-    except SyntaxError:
-        return set()
-    lines = set()
-    for node in body:
-        if isinstance(node, ast.ClassDef) and any(re.search(GAME_BASE, ast.unparse(b)) for b in node.bases):
-            lines.update(range(node.lineno, node.end_lineno + 1))
-    return lines
+    return {n for _, first, last in scene_classes(content).values() for n in range(first, last + 1)}
 
 
 def line_starts(content: str) -> list[int]:
@@ -2289,6 +2655,81 @@ def call_args(content: str, start: int) -> tuple[int, list[str]] | None:
     return None
 
 
+# Private modules of bascenev1 at 1.7.20 (api 7 had them in ba)
+SCENE_PRIVATE_MODULES = """
+    _activity _activitytypes _actor _campaign _collision _coopgame _coopsession _debug _dependency
+    _dualteamsession _featureset _freeforallsession _gameactivity _gameresults _gameutils _level
+    _lobby _map _messages _multiteamsession _music _nodeactor _player _playlist _powerup _profile
+    _score _session _settings _stats _teamgame _team
+""".split()
+
+
+def simple_expression(text: str) -> bool:
+    """True if text can take `.attr` or `(...)` without parens around it."""
+    try:
+        node = ast.parse(text.strip(), mode="eval").body
+    except SyntaxError:
+        return False
+    return isinstance(node, (ast.Name, ast.Attribute, ast.Call, ast.Subscript))
+
+
+def timer_repeats(args: list[str]) -> bool:
+    """True if timer() call args repeat it (repeat=..., or a third positional arg)."""
+    return len(args) > 2 or any(re.match(r'\s*repeat\s*=', a) for a in args)
+
+
+def drop_timetypes(content: str) -> str:
+    """Removes api 7 timetype args from timers and time() (after ba.X became babase.X/bascenev1.X).
+
+    Real time is babase.AppTimer/apptimer/apptime now and sim/base time the
+    default. A repeating timer() stays a game timer, apptimer() can't repeat.
+    timetype values baport can't read are left for the timetype note.
+    """
+
+    def call(match: re.Match, args: list[str] | None) -> str | None:
+        if args is None:
+            return None
+        kept, real = [], False
+        for arg in args:
+            value = re.sub(r'^\s*timetype\s*=', "", arg)
+            kind = re.fullmatch(r'\s*(?:[\w.]+\.)?TimeType\.(REAL|SIM|BASE)\s*', value)
+            if kind:
+                real = real or kind.group(1) == "REAL"
+            else:
+                kept.append(arg.strip())
+        if len(kept) == len(args):
+            return None
+        name, kind = match.group(1), match.group(2)
+        if real and not (kind == "timer" and timer_repeats(kept)):
+            name = {"Timer": "babase.AppTimer", "timer": "babase.apptimer", "time": "babase.apptime"}[kind]
+        return f"{name}({', '.join(kept)})"
+
+    return replace_calls(content, r'(?<![\w.])((?:\w+\.)*(Timer|timer|time))\s*\(', call)
+
+
+def playsound_calls(content: str) -> str:
+    """Rewrites api 7 babase.playsound(sound, ...) calls to sound.play(...), same other args."""
+
+    def call(_: re.Match, args: list[str] | None) -> str | None:
+        if not args:
+            return None
+        args = [a.strip() for a in args]
+        sounds = [a for a in args if re.match(r'sound\s*=', a)]
+        sound = re.sub(r'^sound\s*=\s*', "", sounds[0]) if sounds else args[0]
+        rest = [a for a in args if a not in (sounds[:1] or args[:1])]
+        if not simple_expression(sound):
+            sound = f"({sound})"
+        return f"{sound}.play({', '.join(rest)})"
+
+    # passed as a callback: Call(babase.playsound, sound, ...) is Call(sound.play, ...)
+    content = re.sub(
+        r'\b((?:\w+\.)?(?:Weak)?Call(?:Partial)?\(\s*)_?babase\.playsound\s*,\s*([\w.]+)\s*(?=[,)])',
+        r'\1\2.play',
+        content,
+    )
+    return replace_calls(content, r'(?<![\w.])_?babase\.playsound\s*\(', call)
+
+
 def context_refs(content: str) -> str:
     """Rewrites api 7 babase.Context(x) calls (after ba.X became babase.X) to api 8.
 
@@ -2309,9 +2750,7 @@ def context_refs(content: str) -> str:
             return "babase.ContextRef.empty()"
         if isinstance(node, ast.Constant) and node.value == "current":
             return "babase.ContextRef()"
-        if isinstance(node, (ast.Name, ast.Attribute, ast.Call, ast.Subscript)):
-            return f"{arg}.context"
-        return f"({arg}).context"
+        return f"{arg}.context" if simple_expression(arg) else f"({arg}).context"
 
     content = replace_calls(content, r'\bbabase\.Context\s*\(', call)
     return re.sub(r'\bbabase\.Context\b', "babase.ContextRef", content)
@@ -2359,9 +2798,7 @@ def use_app_timers(content: str) -> str:
         parsed = call_args(content, match.end())
         if parsed is None:
             return match.group(0)
-        _, args = parsed
-        repeats = len(args) > 2 or any(re.match(r'\s*repeat\s*=', a) for a in args)
-        return match.group(0) if repeats else f"{base}.apptimer("
+        return match.group(0) if timer_repeats(parsed[1]) else f"{base}.apptimer("
 
     return re.sub(rf'\b(?:{scene})\.(Timer|timer)\(', convert, content)
 

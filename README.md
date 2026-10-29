@@ -16,7 +16,7 @@ For server side plugins/minigames:
 $ python baport.py -t server -f some_plugin.py
 ```
 
-`-t` is only needed when porting from api 6/7. Plugins already on api 8 or 9 can skip it.
+`-t` is only needed when porting from api 6/7. Plugins already on api 8 or 9 can skip it. It decides whether `screenmessage()` stays local (client) or goes to every player (server), and which module loads sounds and textures in menu and UI code. Game code (minigames, maps, actors) always gets the game's `bs.getsound()`/`bs.gettexture()`.
 
 ### Picking a game version
 
