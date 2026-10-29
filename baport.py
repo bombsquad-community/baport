@@ -297,7 +297,8 @@ def drop_removed_function(content: str, module: str, name: str) -> str:
         content = replace_calls(content, rf'{form}\s*\(', lambda _, args: "None" if args is not None else None)
         # assigning to it only adds an attribute, so leave that alone
         content = re.sub(rf'{form}(?!\s*=[^=])', "(lambda *args, **kwargs: None)", content)
-    return content
+    # the private module the api 7 port imported for it
+    return drop_module_import(content, "_" + module, unless_used=True)
 
 
 def module_alias(content: str, *modules: str) -> tuple[str, str]:
@@ -746,6 +747,7 @@ class Api8:
         content = content.replace(
             "babase.app.add_coop_practice_level", "babase.app.classic.add_coop_practice_level"
         )
+        content = campaign_lookups(content)
         content = content.replace("babase._campaign", "bascenev1._campaign")
         content = content.replace("babase.Level", "bascenev1._level.Level")
         content = content.replace(
@@ -1222,6 +1224,23 @@ class Api8:
     def v1_7_20_misplaced(content: str, plugin_type: str | None) -> str:
         """babase.Setting etc. to bascenev1/bauiv1, bs.Widget etc. to bauiv1, app.ui_v1.party_window to app.classic."""
         return fix_misplaced_names(content, plugin_type)
+
+    @change(
+        "1.7.20",
+        private=True,
+        removed=[
+            "_babase.bless",
+            "_babase.reset_game_activity_tracking",
+            "_babase.set_telnet_access_enabled",
+            "_babase.time_format_check",
+        ],
+    )
+    def v1_7_20_private(content: str) -> str:
+        """private: api 7's _ba names the api 7 port left in _babase move to _bascenev1/_bauiv1/_baclassic, 4 removed."""
+        for module, names in API7_NATIVE_MOVES.items():
+            for name in names:
+                content = move_name(content, f"_babase.{name}", f"{module}.{name}")
+        return content
 
     @change("1.7.21")
     def v1_7_21(content: str) -> str:
@@ -2136,6 +2155,11 @@ MANUAL_FIXES = [
         "cloudui was replaced by doc-ui, subclass bauiv1lib.docui.DocUIController",
     ),
     (
+        r'\bStoreButton\b|bauiv1lib\.store\.button\b|^\s*from bauiv1lib\.store import .*\bbutton\b',
+        (1, 7, 37),
+        "StoreButton was removed, the main menu's store button is bui.get_special_widget('store_button')",
+    ),
+    (
         r'\bPurchaseWindow\b|bauiv1lib\.purchase\b|^\s*from bauiv1lib import .*\bpurchase\b',
         (1, 7, 60),
         "PurchaseWindow was removed, purchases go through the doc-ui store: bauiv1lib.store.StoreUIController",
@@ -2255,7 +2279,7 @@ def manual_fixes(content: str, target: tuple[int, ...]) -> list[str]:
         scene = module_aliases(content, "bascenev1")
         timers = rf'\b({scene})\.(Timer|timer)\('
         if scene and re.search(timers, content):
-            in_game = game_class_lines(content)
+            in_game = scope_of(content).lines
             lines = ["" if n in in_game else line for n, line in enumerate(lines, 1)]
             if shown := hit_lines(lines, [timers]):
                 notes.append(
@@ -2330,6 +2354,20 @@ def is_game(content: str) -> bool:
     )
 
 
+SCENE_LIBRARY = re.compile(r'(?:bascenev1lib|bastd)\.(?:actor|game)\b')
+
+
+def library_imports(tree: ast.Module) -> set[str]:
+    """Names bound to bascenev1lib.actor/.game modules or their classes (api 7: bastd)."""
+    imported = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and SCENE_LIBRARY.match(node.module or ""):
+            imported |= {a.asname or a.name for a in node.names}
+        elif isinstance(node, ast.Import):
+            imported |= {a.asname for a in node.names if a.asname and SCENE_LIBRARY.match(a.name)}
+    return imported
+
+
 def scene_classes(content: str) -> dict[str, tuple[str, int, int]]:
     """Top level classes of game code: {name: ("actor" or "game", first line, last line)}.
 
@@ -2341,14 +2379,7 @@ def scene_classes(content: str) -> dict[str, tuple[str, int, int]]:
     tree = parse(content)
     if tree is None:
         return {}
-    library = re.compile(r'(?:bascenev1lib|bastd)\.(?:actor|game)\b')
-    # names bound to bascenev1lib.actor/.game modules or their classes
-    imported = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom) and library.match(node.module or ""):
-            imported |= {a.asname or a.name for a in node.names}
-        elif isinstance(node, ast.Import):
-            imported |= {a.asname for a in node.names if a.asname and library.match(a.name)}
+    imported = library_imports(tree)
     classes: dict[str, tuple[str, int, int]] = {}
     pending = [n for n in tree.body if isinstance(n, ast.ClassDef)]
     while True:
@@ -2362,7 +2393,7 @@ def scene_classes(content: str) -> dict[str, tuple[str, int, int]]:
                     kind = classes[root][0]
                 elif game:
                     kind = "game"
-                elif library.match(text) or root in imported or re.search(r'Actor|Spaz', last):
+                elif SCENE_LIBRARY.match(text) or root in imported or re.search(r'Actor|Spaz', last):
                     kind = "actor"
                 else:
                     continue
@@ -2579,7 +2610,7 @@ def party_window_open_states(content: str) -> str:
 
 class Scope:
     """Where content's game code is: the whole file when it exports a game or map,
-    else scene_classes() and top level functions that make nodes.
+    else scene_classes() and game_function_lines().
 
     Use scope_of() to share one per content.
     """
@@ -2589,13 +2620,10 @@ class Scope:
         if is_game(content):
             self.lines = None
             return
-        self.lines = game_class_lines(content)
-        tree = parse(content)
-        for node in tree.body if tree else []:
-            if isinstance(node, ast.FunctionDef) and any(
-                getattr(getattr(n, "func", None), "attr", None) == "newnode" for n in ast.walk(node)
-            ):
-                self.lines.update(range(node.lineno, node.end_lineno + 1))
+        classes = scene_classes(content)
+        self.lines = {n for _, first, last in classes.values() for n in range(first, last + 1)}
+        if tree := parse(content):
+            self.lines |= game_function_lines(tree, classes)
 
     def in_game(self, offset: int) -> bool:
         return self.lines is None or line_number(self.starts, offset) in self.lines
@@ -2604,13 +2632,61 @@ class Scope:
 scope_of = lru_cache(maxsize=4)(Scope)
 
 
-def game_class_lines(content: str) -> set[int]:
-    """Line numbers inside scene_classes(), where game timers are right.
+def game_function_lines(tree: ast.Module, classes: dict[str, tuple[str, int, int]]) -> set[int]:
+    """Lines of functions that run inside a game, wherever they are defined.
 
-    That holds even when the file only exports a Plugin (plugins that
-    register or patch games, or add bots).
+    Those that make nodes, get the activity or take one as an `activity`
+    argument, and those patched onto a scene class (`Spaz.curse = f`, also
+    through a wrapper: `Bomb.__init__ = wrap(Bomb.__init__)` marks all of wrap).
     """
-    return {n for _, first, last in scene_classes(content).values() for n in range(first, last + 1)}
+    imported = library_imports(tree)
+
+    def scene_target(expr: ast.expr) -> bool:
+        text = ast.unparse(expr)
+        parts = text.split(".")
+        return bool(SCENE_LIBRARY.match(text)) or any(
+            p in classes or p in imported or re.fullmatch(r'\w*(Activity|Game|Session|Map|Actor|Spaz|Bot)', p)
+            for p in parts
+        )
+
+    # by scope: the patched name is a function defined next to (or above) the assignment
+    patched = set()
+    for scope in ast.walk(tree):
+        if not isinstance(scope, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        defs = {f.name: f for f in scope.body if isinstance(f, (ast.FunctionDef, ast.AsyncFunctionDef))}
+        for node in ast.walk(scope) if defs else []:
+            if isinstance(node, ast.Assign) and any(
+                isinstance(t, ast.Attribute) and scene_target(t.value) for t in node.targets
+            ):
+                value = node.value.func if isinstance(node.value, ast.Call) else node.value
+                if isinstance(value, ast.Name) and value.id in defs:
+                    patched.add(id(defs[value.id]))
+
+    def own_calls(function: ast.AST) -> set[str]:
+        """Names of what function calls itself, not in functions nested in it."""
+        found, pending = set(), list(ast.iter_child_nodes(function))
+        while pending:
+            node = pending.pop()
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)):
+                continue
+            if isinstance(node, ast.Call):
+                found.add(getattr(node.func, "attr", None) or getattr(node.func, "id", None))
+            pending += ast.iter_child_nodes(node)
+        return found
+
+    lines = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        args = node.args.posonlyargs + node.args.args + node.args.kwonlyargs
+        if (
+            id(node) in patched
+            or own_calls(node) & {"newnode", "getactivity"}
+            or any(a.arg == "activity" for a in args)
+        ):
+            lines.update(range(node.lineno, node.end_lineno + 1))
+    return lines
 
 
 def line_starts(content: str) -> list[int]:
@@ -2654,6 +2730,35 @@ def call_args(content: str, start: int) -> tuple[int, list[str]] | None:
         current += char
     return None
 
+
+# Native functions api 7's _ba had that 1.7.20 moved to another native module
+# (names in both _bascenev1 and _bauiv1 follow the plugin type, see fix_misplaced_names)
+API7_NATIVE_MOVES = {
+    "_bascenev1": """
+        camerashake capture_gamepad_input capture_keyboard_input chatmessage client_info_query_response
+        connect_to_party disconnect_client disconnect_from_host emitfx end_host_scanning getactivity
+        get_chat_messages get_client_public_device_uuid get_collision_info get_configurable_game_pads
+        get_connection_to_host_info getdata get_foreground_host_activity get_foreground_host_session
+        get_game_port get_game_roster getinputdevice get_local_active_input_devices_count getnodes
+        get_package_data get_package_sound get_package_texture get_public_party_enabled
+        get_public_party_max_size get_random_names get_replay_speed_exponent getsession
+        get_ui_input_device have_connected_clients have_touchscreen_input host_scan_cycle is_in_replay
+        ls_input_devices ls_objects newactivity new_host_session newnode new_replay_session printnodes
+        register_activity register_session release_gamepad_input release_keyboard_input
+        reset_random_player_names set_admins set_authenticate_clients set_debug_speed_exponent
+        set_enable_default_kick_voting set_map_bounds set_master_server_source set_public_party_enabled
+        set_public_party_max_size set_public_party_name set_public_party_queue_enabled
+        set_public_party_stats_url set_replay_speed_exponent set_touchscreen_editing time timer
+    """.split(),
+    "_bauiv1": """
+        back_press buttonwidget can_show_ad checkboxwidget columnwidget console_print containerwidget
+        focus_window get_qrcode_texture get_special_widget has_video_ads have_incentivized_ad
+        hscrollwidget imagewidget is_party_icon_visible open_file_externally open_url rowwidget
+        scrollwidget set_party_icon_always_visible set_party_window_open show_ad show_ad_2
+        show_app_invite show_online_score_ui textwidget uibounds widget
+    """.split(),
+    "_baclassic": ["value_test"],
+}
 
 # Private modules of bascenev1 at 1.7.20 (api 7 had them in ba)
 SCENE_PRIVATE_MODULES = """
@@ -2730,15 +2835,26 @@ def playsound_calls(content: str) -> str:
     return replace_calls(content, r'(?<![\w.])_?babase\.playsound\s*\(', call)
 
 
+def campaign_lookups(content: str) -> str:
+    """Rewrites api 7's babase._campaign.getcampaign (after ba.X became babase.X) to babase.app.classic.getcampaign."""
+    local = imported_as(content, "babase._campaign", "getcampaign")
+    content = drop_import_name(content, "babase._campaign", "getcampaign")
+    names = "|".join(filter(None, [r'(?<![\w.])babase\._campaign\.getcampaign', bare_names(local)]))
+    if not re.search(rf'(?:{names})\b', content):
+        return content
+    content = re.sub(rf'(?:{names})\b(?!\s*=[^=])', "babase.app.classic.getcampaign", content)
+    return ensure_import(content, "babase")
+
+
 def context_refs(content: str) -> str:
-    """Rewrites api 7 babase.Context(x) calls (after ba.X became babase.X) to api 8.
+    """Rewrites api 7 babase.Context(x) calls (after ba.X became babase.X, _ba.X _babase.X) to api 8.
 
     ContextRef() takes no args: 'ui' and 'empty' are ContextRef.empty() now,
     'current' is ContextRef(), and an activity or session gives its .context.
-    Other references to the class are babase.ContextRef.
+    Other references to the class are (_)babase.ContextRef.
     """
 
-    def call(_: re.Match, args: list[str] | None) -> str | None:
+    def call(match: re.Match, args: list[str] | None) -> str | None:
         if args is None or len(args) != 1:
             return None
         arg = args[0].strip()
@@ -2747,13 +2863,13 @@ def context_refs(content: str) -> str:
         except SyntaxError:
             return None
         if isinstance(node, ast.Constant) and node.value in ("ui", "UI", "empty"):
-            return "babase.ContextRef.empty()"
+            return f"{match.group(1)}.ContextRef.empty()"
         if isinstance(node, ast.Constant) and node.value == "current":
-            return "babase.ContextRef()"
+            return f"{match.group(1)}.ContextRef()"
         return f"{arg}.context" if simple_expression(arg) else f"({arg}).context"
 
-    content = replace_calls(content, r'\bbabase\.Context\s*\(', call)
-    return re.sub(r'\bbabase\.Context\b', "babase.ContextRef", content)
+    content = replace_calls(content, r'(?<![\w.])(_?babase)\.Context\s*\(', call)
+    return re.sub(r'(?<![\w.])(_?babase)\.Context\b', r'\1.ContextRef', content)
 
 
 def print_to_logging(content: str, pattern: str, kind: str) -> str:
@@ -2781,17 +2897,17 @@ def use_app_timers(content: str) -> str:
 
     bs.Timer() becomes babase.AppTimer() (same arguments). bs.timer() becomes
     babase.apptimer(), unless it repeats, since apptimer() can't. Timers in
-    game, session, actor or bot classes are left alone.
+    game code (Scope: game, session, actor or bot classes, functions that run
+    in a game) are left alone.
     """
     scene = module_aliases(content, "bascenev1")
     if not scene or not re.search(rf'\b({scene})\.(Timer|timer)\(', content):
         return content
     content, base = module_alias(content, "babase")
-    in_game = game_class_lines(content)
-    starts = line_starts(content)
+    scope = scope_of(content)
 
     def convert(match: re.Match) -> str:
-        if line_number(starts, match.start()) in in_game:
+        if scope.in_game(match.start()):
             return match.group(0)
         if match.group(1) == "Timer":
             return f"{base}.AppTimer("
