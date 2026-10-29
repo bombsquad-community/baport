@@ -1,0 +1,4 @@
+Porting api7_volleyball.py (api 7) to 1.8.5 (api 9)
+  changes from: 1.7.20, 1.7.37, 1.8.0
+  deprecated (works until api 9 support ends):
+    line 553, 642: use get_preview_texture() / preview_texture= with an asset-package wrapper instead

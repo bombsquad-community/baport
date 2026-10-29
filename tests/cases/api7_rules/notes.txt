@@ -1,0 +1,4 @@
+Porting api7_rules.py (api 7) to 1.8.5 (api 9)
+  changes from: 1.7.20, 1.7.37, 1.7.44, 1.7.53, 1.7.63, 1.8.0
+  must fix (fails on load or when that code runs):
+    line 26: private _bascenev1.get_ui_input_device was removed in 1.7.44

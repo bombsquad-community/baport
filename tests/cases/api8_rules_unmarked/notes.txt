@@ -1,0 +1,7 @@
+Porting api8_rules_unmarked.py (api 8) to 1.8.5 (api 9)
+  changes from: 1.7.37, 1.7.39, 1.7.44, 1.7.53, 1.8.0
+  must fix (fails on load or when that code runs):
+    line 36: game timers only work inside a game, for menu/ui/chat code use --app-timers (a repeating bs.timer() needs a babase.AppTimer kept in a variable, by hand)
+  deprecated (works until api 9 support ends):
+    line 54: the game calls this with langstr=True and wants a babase.LangStr then (LangStr.from_text(...)), the Lstr only without it
+    line 55: Lstr is going away when api 9 ends, migrate to LangStr

@@ -1,0 +1,4 @@
+Porting api6_basics.py (api 6) to 1.8.5 (api 9)
+  changes from: 1.6.0, 1.7.0, 1.7.2, 1.7.7, 1.7.14, 1.7.20, 1.7.37, 1.7.44
+  must fix (fails on load or when that code runs):
+    line 26: private _babase.get_v1_cloud_log was removed in 1.8.0

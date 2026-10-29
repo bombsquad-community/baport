@@ -1,0 +1,4 @@
+Porting api9_bot_chase.py (api 9) to 1.8.5 (api 9)
+  deprecated (works until api 9 support ends):
+    line 77: Lstr is going away when api 9 ends, migrate to LangStr
+    line 219: use get_preview_texture() / preview_texture= with an asset-package wrapper instead

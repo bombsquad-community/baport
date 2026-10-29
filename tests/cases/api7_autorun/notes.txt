@@ -1,0 +1,4 @@
+Porting api7_autorun.py (api 7) to 1.8.5 (api 9)
+  changes from: 1.7.20, 1.7.37, 1.7.44, 1.7.63
+  must fix (fails on load or when that code runs):
+    line 27: TimeType is gone, timers take seconds (use babase.AppTimer for real time)

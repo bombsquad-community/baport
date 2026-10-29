@@ -59,4 +59,17 @@ Plugins sometimes use private parts of the game (`_babase`, `babase._apputils`, 
 ### Other options
 
 - `-n`/`--dry-run` prints a diff instead of writing the file.
-- After porting, baport lists things it couldn't convert automatically, with line numbers.
+- After porting, baport lists things it couldn't convert automatically, with line numbers. They come in two groups: "must fix" (fails on load or when that code runs) and "deprecated" (works until api 9 support ends, like `Lstr`).
+- Each of those lines also gets a `# baport: ...` comment (`# baport, deprecated: ...` for deprecated ones), so you can find them in your editor. Porting again replaces the markers. `--no-mark` leaves them out, and removes ones an earlier port added.
+
+## Development
+
+baport has no dependencies, and runs on Python 3.10 or newer. `tests/run.py` ports every plugin in `tests/cases` and compares the result with what it ported to before. Each ported file must also compile, and porting it again must change nothing:
+
+```
+$ python tests/run.py               # every case
+$ python tests/run.py autorun api8  # cases whose name contains one of these
+$ python tests/run.py --update      # accept the current output
+```
+
+After a change that is meant to alter the output, run `--update` and review the `tests/cases` diff in git before committing. Each case is a directory with `input.py`, an optional `args` file (default `-t client`), and the recorded `expected.py` and `notes.txt`. Most inputs are plugins from [plugin-manager](https://github.com/bombsquad-community/plugin-manager), as they were before being ported to api 8 or 9, under its MIT license (see `tests/cases/LICENSE`). Only plugins that don't state other terms of their own are used. The `api6_basics`, `api7_rules`, `api8_rules` and `api8_rules_unmarked` cases are handwritten, for rules no real plugin covers.
